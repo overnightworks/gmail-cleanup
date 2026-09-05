@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+credentials.json
+token_*.json
+senders.csv
+senders*.csv
