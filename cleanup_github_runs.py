@@ -1,6 +1,6 @@
 """One-off: trash GitHub 'Run failed' emails + create auto-trash filter."""
 
-from auth import SCRIPT_DIR, get_credentials
+from auth import SECRETS_DIR, get_credentials
 from googleapiclient.discovery import build
 
 SCOPES = [
@@ -11,7 +11,7 @@ QUERY = 'from:notifications@github.com subject:"Run failed"'
 
 
 def main() -> None:
-    creds = get_credentials(SCOPES, SCRIPT_DIR / "token_modify.json")
+    creds = get_credentials(SCOPES, SECRETS_DIR / "token_modify.json")
     svc = build("gmail", "v1", credentials=creds)
 
     total = 0

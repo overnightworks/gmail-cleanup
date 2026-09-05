@@ -66,6 +66,6 @@ Split on purpose — recon can never modify your mailbox.
 
 ## Files
 
-- `credentials.json` — OAuth client secret. **Never commit.** `.gitignore`d.
-- `token_*.json` — cached user tokens. **Never commit.** `.gitignore`d.
+- `~/.secrets/gmail-cleanup/credentials.json` — OAuth client secret, lives outside the repo.
+- `~/.secrets/gmail-cleanup/token_*.json` — cached user tokens, same folder.
 - `senders.csv` — your working CSV. `.gitignore`d.

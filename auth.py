@@ -1,4 +1,4 @@
-"""Shared Gmail OAuth helper. Caches token.json per scope set."""
+"""Shared Gmail OAuth helper. OAuth client and cached tokens live in ~/.secrets/gmail-cleanup."""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-CREDENTIALS_FILE = SCRIPT_DIR / "credentials.json"
+SECRETS_DIR = Path.home() / ".secrets" / "gmail-cleanup"
+CREDENTIALS_FILE = SECRETS_DIR / "credentials.json"
 
 
 def get_credentials(scopes: list[str], token_file: Path) -> Credentials:

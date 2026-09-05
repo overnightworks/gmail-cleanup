@@ -12,13 +12,13 @@ from pathlib import Path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from auth import SCRIPT_DIR, get_credentials
+from auth import SCRIPT_DIR, SECRETS_DIR, get_credentials
 
 MODIFY_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
-TOKEN_FILE = SCRIPT_DIR / "token_modify.json"
+TOKEN_FILE = SECRETS_DIR / "token_modify.json"
 
 ACTION_UNSUBSCRIBE = "unsubscribe"
 ACTION_TRASH = "trash"
