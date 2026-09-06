@@ -12,10 +12,20 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
+from auth import SECRETS_DIR
+
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+# Local, gitignored file holding personal and third-party sender data; see
+# personal_senders.example.json for its shape and README.md for setup.
+PERSONAL_SENDERS_FILE = SECRETS_DIR / "personal_senders.json"
+PERSONAL_SENDERS_EXAMPLE_FILE = SCRIPT_DIR / "personal_senders.example.json"
 
 KEEP_PATTERNS = [
     r"^service@paypal\.de$",
@@ -47,9 +57,6 @@ KEEP_PATTERNS = [
     r"^notifications@link\.com$",
     r"^no-reply@onelogin",
     r"^onedrive@infomail\.microsoft\.com$",
-    r"^felix\.hummert@gmail\.com$",
-    r"^voglstefan@gmx\.de$",
-    r"^stefan\.hummert@gmail\.com$",
     r"@posteo\.",
     r"^kundeninformation@emails\.dkb\.de$",
     r"^steuerwelt@buhl\.de$",
@@ -249,8 +256,63 @@ NEWSLETTER_SUBDOMAIN = re.compile(
 )
 
 
-def classify(email: str, has_unsub: str) -> str:
-    for pattern in KEEP_PATTERNS:
+@dataclass(frozen=True)
+class PersonalSendersConfig:
+    """Personal and third-party sender data, loaded from a local, gitignored file.
+
+    ``personal_senders`` and ``trash_senders`` back setup_personal.py's label
+    and trash actions; ``personal_keep_patterns`` extends KEEP_PATTERNS with
+    the operator's own addresses.
+    """
+
+    personal_senders: tuple[str, ...]
+    trash_senders: tuple[str, ...]
+    personal_keep_patterns: tuple[str, ...]
+
+
+def _malformed_config_error(path: Path, detail: str) -> ValueError:
+    return ValueError(
+        f"{path} {detail} — see {PERSONAL_SENDERS_EXAMPLE_FILE} for the expected shape."
+    )
+
+
+def _load_string_list_field(data: dict, field: str, path: Path) -> tuple[str, ...]:
+    if field not in data:
+        raise _malformed_config_error(path, f"is missing field {field!r}")
+    value = data[field]
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise _malformed_config_error(path, f"field {field!r} must be a list of strings")
+    return tuple(value)
+
+
+def load_personal_senders_config(path: Path | None = None) -> PersonalSendersConfig:
+    """Load personal sender data from ``path`` (default: PERSONAL_SENDERS_FILE).
+
+    Raises FileNotFoundError naming the file and the tracked example when it
+    is missing, and ValueError naming the file when its content is not a JSON
+    object or a field is missing or not a list of strings.
+    """
+    path = path or PERSONAL_SENDERS_FILE
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing {path}. Copy {PERSONAL_SENDERS_EXAMPLE_FILE} to {path} "
+            "and fill in your own addresses — see README.md."
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise _malformed_config_error(path, f"is not valid JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise _malformed_config_error(path, "must contain a JSON object")
+    return PersonalSendersConfig(
+        personal_senders=_load_string_list_field(data, "personal_senders", path),
+        trash_senders=_load_string_list_field(data, "trash_senders", path),
+        personal_keep_patterns=_load_string_list_field(data, "personal_keep_patterns", path),
+    )
+
+
+def classify(email: str, has_unsub: str, personal_keep_patterns: Sequence[str] = ()) -> str:
+    for pattern in (*KEEP_PATTERNS, *personal_keep_patterns):
         if re.search(pattern, email):
             return "keep"
     for pattern in TRASH_PATTERNS:
@@ -270,13 +332,15 @@ def main() -> None:
     args = parser.parse_args()
     out_path = args.out or args.csv
 
+    config = load_personal_senders_config()
+
     with args.csv.open("r", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
         fieldnames = list(rows[0].keys()) if rows else []
 
     counts = {"keep": 0, "trash": 0, "filter": 0}
     for row in rows:
-        action = classify(row["from_email"], row["has_list_unsubscribe"])
+        action = classify(row["from_email"], row["has_list_unsubscribe"], config.personal_keep_patterns)
         row["action"] = action
         counts[action] = counts.get(action, 0) + 1
 

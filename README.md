@@ -21,7 +21,9 @@ Two-phase Gmail inbox cleanup:
 5. **Create OAuth client**: APIs & Services → Credentials → Create Credentials → OAuth client ID.
    - Application type: **Desktop app**
    - Name: anything
-   - After creating, click the download icon → save the JSON as `credentials.json` in this directory.
+   - After creating, click the download icon → save the JSON as
+     `~/.secrets/gmail-cleanup/credentials.json` (create the directory first if it
+     doesn't exist yet).
 
 Done. You'll never touch the Cloud Console again unless Google changes something.
 
@@ -78,4 +80,29 @@ Split on purpose — recon can never modify your mailbox.
 
 - `~/.secrets/gmail-cleanup/credentials.json` — OAuth client secret, lives outside the repo.
 - `~/.secrets/gmail-cleanup/token_*.json` — cached user tokens, same folder.
+- `~/.secrets/gmail-cleanup/personal_senders.json` — your personal and third-party sender
+  data (see below). `.gitignore`d as a fallback if it ever ends up in the repo directory.
 - `senders.csv` — your working CSV. `.gitignore`d.
+
+## Personal senders
+
+`classify.py` and `setup_personal.py` read personal addresses, the trash-list
+of old acquaintances, and extra keep-patterns for your own addresses from
+`~/.secrets/gmail-cleanup/personal_senders.json` — this keeps other people's
+addresses out of tracked source. Set it up once:
+
+```bash
+mkdir -p ~/.secrets/gmail-cleanup
+cp personal_senders.example.json ~/.secrets/gmail-cleanup/personal_senders.json
+# edit ~/.secrets/gmail-cleanup/personal_senders.json with your own addresses
+```
+
+The file has three fields:
+
+- `personal_senders` — addresses `setup_personal.py` labels "Personal" and filters.
+- `trash_senders` — addresses `setup_personal.py` trashes outright.
+- `personal_keep_patterns` — extra regexes `classify.py` treats as keep, alongside
+  the generic service patterns already in `KEEP_PATTERNS`.
+
+Running either script without this file fails immediately with an error naming
+the missing file and the example.

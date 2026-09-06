@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 credentials.json
 token_*.json
+personal_senders.json
 senders.csv
 senders*.csv
 coverage.xml
