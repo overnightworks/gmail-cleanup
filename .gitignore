@@ -5,3 +5,6 @@ credentials.json
 token_*.json
 senders.csv
 senders*.csv
+coverage.xml
+.coverage
+.pytest_cache/

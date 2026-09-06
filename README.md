@@ -27,11 +27,12 @@ Done. You'll never touch the Cloud Console again unless Google changes something
 
 ## Install
 
+Prerequisite: [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
 ```bash
 cd ~/git/gmail-cleanup
-python3 -m venv .venv
+uv sync --locked --no-build
 source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
 ## Use
@@ -49,6 +50,15 @@ python act.py --csv senders.csv
 # 4. Actually do it.
 python act.py --csv senders.csv --execute
 ```
+
+## Tests
+
+```bash
+uv sync --locked --no-build --group dev
+uv run --locked --no-build pytest
+```
+
+CI runs the same commands, then uploads coverage to SonarCloud and fails on any open finding in scope.
 
 ## Actions
 

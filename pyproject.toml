@@ -1,0 +1,37 @@
+[project]
+name = "gmail-cleanup"
+version = "0.1.0"
+description = "Personal Gmail inbox cleanup scripts"
+requires-python = ">=3.12"
+dependencies = [
+    "google-api-python-client>=2.100.0",
+    "google-auth>=2.25.0",
+    "google-auth-oauthlib>=1.2.0",
+]
+
+# This project has no package to build; uv only manages the venv, not a
+# distributable artifact.
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The scripts are flat modules at the repository root (no package); this puts
+# the root on sys.path so tests can `import classify` etc. without one.
+pythonpath = ["."]
+addopts = "--cov=. --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml"
+
+[tool.coverage.run]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    'if __name__ == .__main__.:',
+]
