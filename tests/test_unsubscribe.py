@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import unsubscribe
+from gmail_cleanup import unsubscribe
 
 CANDIDATE_ROW = {
     "action": "unsubscribe",
@@ -116,7 +116,7 @@ def test_main_dry_run_lists_candidates_without_sending_anything(
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
     unreachable_urlopen: Callable[..., object],
 ) -> None:
-    monkeypatch.setattr(unsubscribe, "SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(unsubscribe, "CSV_DIR", tmp_path)
     csv_path = tmp_path / "senders-full.csv"
     write_csv_of_senders(csv_path, [CANDIDATE_ROW])
     monkeypatch.setattr(sys, "argv", ["unsubscribe.py", "--csv", str(csv_path)])
@@ -136,7 +136,7 @@ def test_main_execute_counts_successes_and_failures(
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
     fake_urlopen: Callable[[int], Callable[..., object]],
 ) -> None:
-    monkeypatch.setattr(unsubscribe, "SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(unsubscribe, "CSV_DIR", tmp_path)
     csv_path = tmp_path / "senders-full.csv"
     write_csv_of_senders(
         csv_path,
@@ -163,12 +163,12 @@ def test_main_execute_counts_successes_and_failures(
     assert "Done: 1 unsubscribed, 1 failed" in out
 
 
-def test_main_refuses_a_csv_path_outside_the_script_directory(
+def test_main_refuses_a_csv_path_outside_the_repository_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    allowed = tmp_path / "scripts"
+    allowed = tmp_path / "repository"
     allowed.mkdir()
-    monkeypatch.setattr(unsubscribe, "SCRIPT_DIR", allowed)
+    monkeypatch.setattr(unsubscribe, "CSV_DIR", allowed)
     outside_csv = tmp_path / "elsewhere" / "senders-full.csv"
     monkeypatch.setattr(sys, "argv", ["unsubscribe.py", "--csv", str(outside_csv)])
 

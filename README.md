@@ -2,9 +2,9 @@
 
 Two-phase Gmail inbox cleanup:
 
-1. `recon.py` — read-only scan, groups messages by sender, flags which have `List-Unsubscribe` headers, dumps `senders.csv` sorted by volume.
+1. `recon` — read-only scan, groups messages by sender, flags which have `List-Unsubscribe` headers, dumps `senders.csv` sorted by volume.
 2. You eyeball the CSV and mark each sender: `unsubscribe`, `trash`, `filter`, or `keep` (or leave blank = skip).
-3. `act.py` — reads the reviewed CSV and acts. Dry run by default, `--execute` to apply.
+3. `act` — reads the reviewed CSV and acts. Dry run by default, `--execute` to apply.
 
 ## One-time Google Cloud Console setup (~5 min)
 
@@ -39,28 +39,35 @@ source .venv/bin/activate
 
 ## Use
 
+The scripts are the `gmail_cleanup` package under `src/`. The project is not
+installed into the venv, so run them as modules with `src` on the import path,
+from the repository directory:
+
 ```bash
 # 1. Recon (read-only). First run opens a browser — click "Allow".
-python recon.py --days 90
+PYTHONPATH=src python -m gmail_cleanup.recon --days 90
 
 # 2. Edit senders.csv — fill the 'action' column.
 #    Values: unsubscribe | trash | filter | keep | (blank)
 
 # 3. Dry run — shows what would happen.
-python act.py --csv senders.csv
+PYTHONPATH=src python -m gmail_cleanup.act --csv senders.csv
 
 # 4. Actually do it.
-python act.py --csv senders.csv --execute
+PYTHONPATH=src python -m gmail_cleanup.act --csv senders.csv --execute
 ```
 
-`--csv` and `--out` must point inside the script directory: a path outside it exits non-zero without reading or writing anything — including a relative path, which is resolved against your current working directory, not the script's.
+`--csv` and `--out` must point inside the repository directory, where your CSVs live: a path outside it exits non-zero without reading or writing anything — including a relative path, which is resolved against your current working directory, not the repository's.
 
 ## Tests
 
 ```bash
 uv sync --locked --no-build --group dev
 uv run --locked --no-build pytest
+uv run --locked --no-build python scripts/check_root_layout.py
 ```
+
+The last command is the root layout gate: it fails naming any file at the repository root that does not belong there (`AGENTS.md`, "Repository layout").
 
 CI runs the same commands, then uploads coverage to SonarCloud and fails on any open finding in scope.
 
@@ -73,8 +80,8 @@ CI runs the same commands, then uploads coverage to SonarCloud and fails on any 
 
 ## Scopes
 
-- `recon.py` requests `gmail.readonly` → cached in `token_readonly.json`.
-- `act.py` requests `gmail.modify` + `gmail.settings.basic` → cached in `token_modify.json`.
+- `recon` requests `gmail.readonly` → cached in `token_readonly.json`.
+- `act` requests `gmail.modify` + `gmail.settings.basic` → cached in `token_modify.json`.
 
 Split on purpose — recon can never modify your mailbox.
 
@@ -88,22 +95,22 @@ Split on purpose — recon can never modify your mailbox.
 
 ## Personal senders
 
-`classify.py` and `setup_personal.py` read personal addresses, the trash-list
+`gmail_cleanup.classify` and `gmail_cleanup.setup_personal` read personal addresses, the trash-list
 of old acquaintances, and extra keep-patterns for your own addresses from
 `~/.secrets/gmail-cleanup/personal_senders.json` — this keeps other people's
 addresses out of tracked source. Set it up once:
 
 ```bash
 mkdir -p ~/.secrets/gmail-cleanup
-cp personal_senders.example.json ~/.secrets/gmail-cleanup/personal_senders.json
+cp src/gmail_cleanup/personal_senders.example.json ~/.secrets/gmail-cleanup/personal_senders.json
 # edit ~/.secrets/gmail-cleanup/personal_senders.json with your own addresses
 ```
 
 The file has three fields:
 
-- `personal_senders` — addresses `setup_personal.py` labels "Personal" and filters.
-- `trash_senders` — addresses `setup_personal.py` trashes outright.
-- `personal_keep_patterns` — extra regexes `classify.py` treats as keep, alongside
+- `personal_senders` — addresses `setup_personal` labels "Personal" and filters.
+- `trash_senders` — addresses `setup_personal` trashes outright.
+- `personal_keep_patterns` — extra regexes `classify` treats as keep, alongside
   the generic service patterns already in `KEEP_PATTERNS`.
 
 Running either script without this file fails immediately with an error naming

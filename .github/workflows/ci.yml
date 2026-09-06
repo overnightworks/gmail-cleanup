@@ -23,6 +23,8 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: uv sync --locked --no-build --group dev
+      - name: Check the repository root layout
+        run: uv run --locked --no-build python scripts/check_root_layout.py
       - name: Run tests with coverage
         run: uv run --locked --no-build pytest -q
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

@@ -2,19 +2,21 @@
 
 Sole owner of the allowed base: act.py, recon.py, and unsubscribe.py all
 confine their ``--csv``/``--out`` argument through ``resolve_within_directory``
-against ``SCRIPT_DIR`` from here, so "where may a CLI path point" has one
-answer. Kept free of the Gmail API and OAuth imports so every script can
-depend on it.
+against ``CSV_DIR`` from here, so "where may a CLI path point" has one answer.
+Kept free of the Gmail API and OAuth imports so every script can depend on it.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+# The repository root, two levels above this package: that is where the
+# operator runs the commands and keeps the reviewed sender CSVs, and the
+# gitignore entries that keep those CSVs untracked live there too.
+CSV_DIR = Path(__file__).resolve().parents[2]
 
 PATH_CONFINEMENT_HELP = (
-    f"must be inside {SCRIPT_DIR}; a path outside it is refused, including a "
+    f"must be inside {CSV_DIR}; a path outside it is refused, including a "
     "relative path when the script runs from another working directory"
 )
 

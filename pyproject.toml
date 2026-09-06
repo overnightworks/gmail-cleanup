@@ -22,9 +22,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# The scripts are flat modules at the repository root (no package); this puts
-# the root on sys.path so tests can `import classify` etc. without one.
-pythonpath = ["."]
+# The project is not installed (see [tool.uv] above), so tests import the
+# gmail_cleanup package from `src` and the root-layout gate from `scripts`
+# straight out of the tree.
+pythonpath = ["src", "scripts"]
 # The floor is 100 %: every module is covered except the process entry points
 # and the OAuth browser flow, which carry their reason at the exclusion.
 addopts = "--cov=. --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=100"

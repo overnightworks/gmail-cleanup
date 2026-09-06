@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-import act
+from gmail_cleanup import act
 
 MARKETING_SENDER = {
     "action": "unsubscribe",
@@ -388,7 +388,7 @@ def test_main_validates_and_forwards_the_parsed_csv_path(
     row: Callable[..., dict[str, str]],
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
 ) -> None:
-    monkeypatch.setattr(act, "SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(act, "CSV_DIR", tmp_path)
     csv_path = tmp_path / "senders.csv"
     write_csv_of_senders(csv_path, [row()])
     calls: list[tuple[Any, ...]] = []
@@ -400,12 +400,12 @@ def test_main_validates_and_forwards_the_parsed_csv_path(
     assert calls == [(csv_path.resolve(), True)]
 
 
-def test_main_refuses_a_csv_path_outside_the_script_directory(
+def test_main_refuses_a_csv_path_outside_the_repository_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    allowed = tmp_path / "scripts"
+    allowed = tmp_path / "repository"
     allowed.mkdir()
-    monkeypatch.setattr(act, "SCRIPT_DIR", allowed)
+    monkeypatch.setattr(act, "CSV_DIR", allowed)
     outside = tmp_path / "elsewhere" / "senders.csv"
     monkeypatch.setattr(sys, "argv", ["act.py", "--csv", str(outside)])
 
@@ -413,9 +413,17 @@ def test_main_refuses_a_csv_path_outside_the_script_directory(
         act.main()
 
 
-def test_main_exits_when_the_csv_is_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(act, "SCRIPT_DIR", tmp_path)
-    monkeypatch.setattr(sys, "argv", ["act.py", "--csv", str(tmp_path / "missing.csv")])
+def test_main_exits_naming_the_command_that_writes_the_missing_csv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(act, "CSV_DIR", tmp_path)
+    missing_csv = tmp_path / "missing.csv"
+    monkeypatch.setattr(sys, "argv", ["act.py", "--csv", str(missing_csv)])
 
-    with pytest.raises(SystemExit, match="Missing"):
+    with pytest.raises(SystemExit) as exit_info:
         act.main()
+
+    assert str(exit_info.value) == (
+        f"Missing {missing_csv.resolve()}. "
+        "Run PYTHONPATH=src python -m gmail_cleanup.recon first."
+    )

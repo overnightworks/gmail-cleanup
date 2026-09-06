@@ -27,8 +27,8 @@ from typing import Any
 import pytest
 from googleapiclient.errors import HttpError
 
-import classify
-from recon import CSV_FIELDNAMES
+from gmail_cleanup import classify
+from gmail_cleanup.recon import CSV_FIELDNAMES
 
 
 @dataclass(frozen=True)

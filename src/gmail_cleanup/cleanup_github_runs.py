@@ -1,6 +1,6 @@
 """One-off: trash GitHub 'Run failed' emails + create auto-trash filter."""
 
-from auth import SECRETS_DIR, get_credentials
+from .auth import SECRETS_DIR, get_credentials
 from googleapiclient.discovery import build
 
 SCOPES = [

@@ -14,8 +14,9 @@ from pathlib import Path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from auth import SECRETS_DIR, get_credentials
-from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
+from . import module_command
+from .auth import SECRETS_DIR, get_credentials
+from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
 READONLY_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 TOKEN_FILE = SECRETS_DIR / "token_readonly.json"
@@ -239,8 +240,9 @@ def run_recon(days: int, max_messages: int, output_csv: Path, include_spam_trash
 
     print(f"\nWrote {output_csv} — {len(senders)} unique senders.")
     print("Edit the 'action' column in the CSV: unsubscribe | trash | filter | keep")
-    print("Then: python act.py --csv senders.csv           (dry run)")
-    print("      python act.py --csv senders.csv --execute (actually do it)")
+    act_command = f"{module_command('act')} --csv senders.csv"
+    print(f"Then: {act_command}           (dry run)")
+    print(f"      {act_command} --execute (actually do it)")
 
 
 def main() -> None:
@@ -252,7 +254,7 @@ def main() -> None:
     parser.add_argument(
         "--out",
         type=Path,
-        default=SCRIPT_DIR / "senders.csv",
+        default=CSV_DIR / "senders.csv",
         help=f"Where to write the sender CSV ({PATH_CONFINEMENT_HELP})",
     )
     parser.add_argument(
@@ -262,7 +264,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        out_path = resolve_within_directory(args.out, SCRIPT_DIR)
+        out_path = resolve_within_directory(args.out, CSV_DIR)
     except ValueError as e:
         sys.exit(str(e))
     run_recon(args.days, args.max, out_path, args.include_spam_trash)

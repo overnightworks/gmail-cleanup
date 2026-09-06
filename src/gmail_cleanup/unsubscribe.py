@@ -22,7 +22,7 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
+from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
 HTTP_TIMEOUT = 10
 
@@ -72,14 +72,14 @@ def main() -> None:
     parser.add_argument(
         "--csv",
         type=Path,
-        default=SCRIPT_DIR / "senders-full.csv",
+        default=CSV_DIR / "senders-full.csv",
         help=f"Sender CSV to read candidates from ({PATH_CONFINEMENT_HELP})",
     )
     parser.add_argument("--recent-days", type=int, default=365)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     try:
-        csv_path = resolve_within_directory(args.csv, SCRIPT_DIR)
+        csv_path = resolve_within_directory(args.csv, CSV_DIR)
     except ValueError as e:
         sys.exit(str(e))
 

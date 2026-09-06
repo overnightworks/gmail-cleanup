@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-import recon
+from gmail_cleanup import recon
 
 
 @pytest.mark.parametrize(
@@ -231,13 +231,17 @@ def test_run_recon_writes_a_csv_of_discovered_senders(
 
     rows = list(csv.DictReader(out_path.open(encoding="utf-8")))
     assert [r["from_email"] for r in rows] == ["promo@example.com"]
-    assert "1 unique senders" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "1 unique senders" in output
+    hand_off_command = "PYTHONPATH=src python -m gmail_cleanup.act --csv senders.csv"
+    assert f"Then: {hand_off_command}" in output
+    assert f"{hand_off_command} --execute (actually do it)" in output
 
 
 def test_main_validates_and_forwards_parsed_arguments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(recon, "SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(recon, "CSV_DIR", tmp_path)
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(recon, "run_recon", lambda *args: calls.append(args))
     out_path = tmp_path / "out.csv"
@@ -252,12 +256,12 @@ def test_main_validates_and_forwards_parsed_arguments(
     assert calls == [(7, 50, out_path.resolve(), True)]
 
 
-def test_main_refuses_an_out_path_outside_the_script_directory(
+def test_main_refuses_an_out_path_outside_the_repository_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    allowed = tmp_path / "scripts"
+    allowed = tmp_path / "repository"
     allowed.mkdir()
-    monkeypatch.setattr(recon, "SCRIPT_DIR", allowed)
+    monkeypatch.setattr(recon, "CSV_DIR", allowed)
     outside = tmp_path / "elsewhere" / "senders.csv"
     monkeypatch.setattr(sys, "argv", ["recon.py", "--out", str(outside)])
 

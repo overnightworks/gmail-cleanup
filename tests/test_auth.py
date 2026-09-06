@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from google.oauth2.credentials import Credentials
 
-import auth
+from gmail_cleanup import auth
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 

@@ -6,8 +6,7 @@ from typing import Any
 
 import pytest
 
-import classify
-import setup_personal
+from gmail_cleanup import classify, setup_personal
 
 PERSONAL_LABEL_ID = "label-personal"
 EXISTING_PERSONAL_LABEL = {"id": PERSONAL_LABEL_ID, "name": setup_personal.PERSONAL_LABEL}

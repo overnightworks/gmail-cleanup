@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-import cleanup_github_runs
+from gmail_cleanup import cleanup_github_runs
 
 
 def test_every_page_of_run_failure_mail_is_trashed_and_counted(

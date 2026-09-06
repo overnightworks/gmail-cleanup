@@ -19,13 +19,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from auth import SECRETS_DIR
-from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
+from .auth import SECRETS_DIR
+from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
-# Local, gitignored file holding personal and third-party sender data; see
-# personal_senders.example.json for its shape and README.md for setup.
+# Local, gitignored file holding personal and third-party sender data; the
+# example next to this loader shows its shape, README.md the setup.
 PERSONAL_SENDERS_FILE = SECRETS_DIR / "personal_senders.json"
-PERSONAL_SENDERS_EXAMPLE_FILE = SCRIPT_DIR / "personal_senders.example.json"
+PERSONAL_SENDERS_EXAMPLE_FILE = Path(__file__).resolve().parent / "personal_senders.example.json"
 
 KEEP_PATTERNS = [
     r"^service@paypal\.de$",
@@ -330,7 +330,7 @@ def main() -> None:
     parser.add_argument(
         "--csv",
         type=Path,
-        default=SCRIPT_DIR / "senders-full.csv",
+        default=CSV_DIR / "senders-full.csv",
         help=f"Sender CSV to classify ({PATH_CONFINEMENT_HELP})",
     )
     parser.add_argument(
@@ -341,8 +341,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        csv_path = resolve_within_directory(args.csv, SCRIPT_DIR)
-        out_path = resolve_within_directory(args.out, SCRIPT_DIR) if args.out else csv_path
+        csv_path = resolve_within_directory(args.csv, CSV_DIR)
+        out_path = resolve_within_directory(args.out, CSV_DIR) if args.out else csv_path
     except ValueError as e:
         sys.exit(str(e))
 

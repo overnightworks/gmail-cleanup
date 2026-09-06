@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-import classify as classify_script
-from classify import (
+from gmail_cleanup import classify as classify_script
+from gmail_cleanup.classify import (
     PERSONAL_SENDERS_EXAMPLE_FILE,
     PersonalSendersConfig,
     classify,
     load_personal_senders_config,
 )
-from recon import CSV_FIELDNAMES
+from gmail_cleanup.recon import CSV_FIELDNAMES
 
 
 def test_list_unsubscribe_header_trashes_an_unlisted_sender() -> None:
@@ -64,8 +64,10 @@ def test_load_personal_senders_config_reads_a_present_file(tmp_path: Path) -> No
 def test_load_personal_senders_config_raises_a_clear_error_when_missing(tmp_path: Path) -> None:
     missing_path = tmp_path / "personal_senders.json"
 
-    with pytest.raises(FileNotFoundError, match=re.escape(str(missing_path))):
+    with pytest.raises(FileNotFoundError, match=re.escape(str(missing_path))) as refusal:
         load_personal_senders_config(missing_path)
+
+    assert str(PERSONAL_SENDERS_EXAMPLE_FILE) in str(refusal.value)
 
 
 @pytest.mark.parametrize(
@@ -162,7 +164,7 @@ def senders_csv(
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
 ) -> Callable[..., Path]:
     """Write an unclassified sender CSV inside the directory main() may read from."""
-    monkeypatch.setattr(classify_script, "SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(classify_script, "CSV_DIR", tmp_path)
 
     def write(*senders: str, name: str = "senders-full.csv") -> Path:
         csv_path = tmp_path / name
@@ -240,7 +242,7 @@ def test_main_keeps_the_header_of_an_empty_sender_csv_it_reports_nothing_for(
         ),
     ],
 )
-def test_main_refuses_a_path_outside_the_script_directory(
+def test_main_refuses_a_path_outside_the_repository_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     senders_csv: Callable[..., Path],

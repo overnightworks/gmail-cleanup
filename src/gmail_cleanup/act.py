@@ -14,8 +14,9 @@ from typing import Any
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from auth import SECRETS_DIR, get_credentials
-from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
+from . import module_command
+from .auth import SECRETS_DIR, get_credentials
+from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
 MODIFY_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -175,7 +176,7 @@ def main() -> None:
     parser.add_argument(
         "--csv",
         type=Path,
-        default=SCRIPT_DIR / "senders.csv",
+        default=CSV_DIR / "senders.csv",
         help=f"Reviewed senders CSV to act on ({PATH_CONFINEMENT_HELP})",
     )
     parser.add_argument(
@@ -185,11 +186,11 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        csv_path = resolve_within_directory(args.csv, SCRIPT_DIR)
+        csv_path = resolve_within_directory(args.csv, CSV_DIR)
     except ValueError as e:
         sys.exit(str(e))
     if not csv_path.exists():
-        sys.exit(f"Missing {csv_path}. Run recon.py first.")
+        sys.exit(f"Missing {csv_path}. Run {module_command('recon')} first.")
     run(csv_path, args.execute)
 
 
