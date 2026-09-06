@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-from collections import defaultdict
-from dataclasses import dataclass, field
+import sys
+import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from pathlib import Path
@@ -13,7 +14,8 @@ from pathlib import Path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from auth import SCRIPT_DIR, SECRETS_DIR, get_credentials
+from auth import SECRETS_DIR, get_credentials
+from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
 
 READONLY_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 TOKEN_FILE = SECRETS_DIR / "token_readonly.json"
@@ -26,6 +28,20 @@ METADATA_HEADERS = [
 ]
 
 BATCH_SIZE = 100
+
+CSV_FIELDNAMES = [
+    "action",
+    "from_email",
+    "from_name",
+    "count",
+    "has_list_unsubscribe",
+    "list_unsubscribe_url",
+    "list_unsubscribe_post",
+    "sample_subject",
+    "oldest_date",
+    "newest_date",
+]
+"""Columns of the sender CSV recon.py writes and act.py/unsubscribe.py read."""
 
 
 @dataclass
@@ -139,42 +155,48 @@ def _run_batch(service, message_ids: list[str], senders: dict[str, SenderStats])
     return retryable
 
 
-def aggregate(service, message_ids: list[str]) -> dict[str, SenderStats]:
-    import time
+def _fetch_pass(
+    service, pending: list[str], senders: dict[str, SenderStats], total: int, attempt: int
+) -> list[str]:
+    """Run one sweep of ``pending`` in batches, returning the ids to retry."""
+    retry_next: list[str] = []
+    for start in range(0, len(pending), BATCH_SIZE):
+        chunk = pending[start : start + BATCH_SIZE]
+        try:
+            retry_next.extend(_run_batch(service, chunk, senders))
+        except HttpError as e:
+            print(f"  full-batch error {start}: {e}")
+            retry_next.extend(chunk)
+        if attempt == 0 and (start + BATCH_SIZE) % 1000 < BATCH_SIZE:
+            done = min(start + BATCH_SIZE, len(pending))
+            print(f"  {done}/{total}")
+    return retry_next
 
+
+def _report_pass_result(attempt: int, retry_count: int) -> None:
+    if attempt == 0:
+        print(f"  pass 1 done: {retry_count} to retry")
+    else:
+        print(f"  retry pass {attempt}: {retry_count} still pending")
+
+
+def aggregate(service, message_ids: list[str]) -> dict[str, SenderStats]:
     senders: dict[str, SenderStats] = {}
     total = len(message_ids)
     pending = list(message_ids)
     attempt = 0
-    dropped = 0
 
     while pending and attempt <= MAX_RETRIES:
-        retry_next: list[str] = []
-        for start in range(0, len(pending), BATCH_SIZE):
-            chunk = pending[start : start + BATCH_SIZE]
-            try:
-                retry_next.extend(_run_batch(service, chunk, senders))
-            except HttpError as e:
-                print(f"  full-batch error {start}: {e}")
-                retry_next.extend(chunk)
-            if attempt == 0 and (start + BATCH_SIZE) % 1000 < BATCH_SIZE:
-                done = min(start + BATCH_SIZE, len(pending))
-                print(f"  {done}/{total}")
-
-        if attempt == 0:
-            print(f"  pass 1 done: {len(retry_next)} to retry")
-        else:
-            print(f"  retry pass {attempt}: {len(retry_next)} still pending")
-
+        retry_next = _fetch_pass(service, pending, senders, total, attempt)
+        _report_pass_result(attempt, len(retry_next))
         pending = retry_next
         if not pending:
             break
         time.sleep(RETRY_BASE_DELAY * (2 ** attempt))
         attempt += 1
 
-    dropped = len(pending)
-    if dropped:
-        print(f"  ({dropped} messages dropped after {MAX_RETRIES} retries)")
+    if pending:
+        print(f"  ({len(pending)} messages dropped after {MAX_RETRIES} retries)")
     return senders
 
 
@@ -182,20 +204,7 @@ def write_csv(senders: dict[str, SenderStats], output_csv: Path) -> None:
     sorted_senders = sorted(senders.values(), key=lambda s: s.count, reverse=True)
     with output_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(
-            [
-                "action",
-                "from_email",
-                "from_name",
-                "count",
-                "has_list_unsubscribe",
-                "list_unsubscribe_url",
-                "list_unsubscribe_post",
-                "sample_subject",
-                "oldest_date",
-                "newest_date",
-            ]
-        )
+        writer.writerow(CSV_FIELDNAMES)
         for s in sorted_senders:
             writer.writerow(
                 [
@@ -240,14 +249,23 @@ def main() -> None:
     parser.add_argument(
         "--max", type=int, default=5000, help="Max messages to scan (default: 5000)"
     )
-    parser.add_argument("--out", type=Path, default=SCRIPT_DIR / "senders.csv")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=SCRIPT_DIR / "senders.csv",
+        help=f"Where to write the sender CSV ({PATH_CONFINEMENT_HELP})",
+    )
     parser.add_argument(
         "--include-spam-trash",
         action="store_true",
         help="Also scan Spam and Trash (default: off)",
     )
     args = parser.parse_args()
-    run_recon(args.days, args.max, args.out, args.include_spam_trash)
+    try:
+        out_path = resolve_within_directory(args.out, SCRIPT_DIR)
+    except ValueError as e:
+        sys.exit(str(e))
+    run_recon(args.days, args.max, out_path, args.include_spam_trash)
 
 
 if __name__ == "__main__":

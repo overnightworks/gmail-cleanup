@@ -53,6 +53,8 @@ python act.py --csv senders.csv
 python act.py --csv senders.csv --execute
 ```
 
+`--csv` and `--out` must point inside the script directory: a path outside it exits non-zero without reading or writing anything — including a relative path, which is resolved against your current working directory, not the script's.
+
 ## Tests
 
 ```bash

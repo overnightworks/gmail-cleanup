@@ -7,12 +7,15 @@ import csv
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from auth import SCRIPT_DIR, SECRETS_DIR, get_credentials
+from auth import SECRETS_DIR, get_credentials
+from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
 
 MODIFY_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -80,45 +83,65 @@ def create_auto_trash_filter(service, from_email: str, execute: bool) -> None:
         service.users().settings().filters().create(userId="me", body=body).execute()
 
 
-def process_row(service, row: dict[str, str], execute: bool) -> str:
+def _recognized_action(row: dict[str, str]) -> str | None:
+    """Return the row's lowercased action, or None if it isn't one act.py knows."""
     action = row["action"].strip().lower()
     if action not in VALID_ACTIONS:
         print(f"[?] {row['from_email']}: unknown action '{action}', skipping")
+        return None
+    return action
+
+
+def _unsubscribe_row(service, row: dict[str, str], execute: bool) -> None:
+    email = row["from_email"]
+    if row["has_list_unsubscribe"] == "yes":
+        ok = (
+            one_click_unsubscribe(
+                row["list_unsubscribe_url"],
+                bool(row.get("list_unsubscribe_post", "").strip()),
+            )
+            if execute
+            else False
+        )
+        if execute:
+            print(f"    one-click: {'ok' if ok else 'not sent (no Post header or HTTP fail)'}")
+        if row["list_unsubscribe_url"] and not row.get("list_unsubscribe_post"):
+            print(f"    manual URL (no one-click): {row['list_unsubscribe_url']}")
+    else:
+        print("    no List-Unsubscribe header — trashing only")
+    n = trash_messages_from(service, email, execute)
+    print(f"    trashed {n} existing messages")
+
+
+def _trash_row(service, row: dict[str, str], execute: bool) -> None:
+    n = trash_messages_from(service, row["from_email"], execute)
+    print(f"    trashed {n} messages")
+
+
+def _filter_row(service, row: dict[str, str], execute: bool) -> None:
+    email = row["from_email"]
+    create_auto_trash_filter(service, email, execute)
+    n = trash_messages_from(service, email, execute)
+    print(f"    filter created + trashed {n} existing")
+
+
+_ACTION_HANDLERS: dict[str, Callable[[Any, dict[str, str], bool], None]] = {
+    ACTION_UNSUBSCRIBE: _unsubscribe_row,
+    ACTION_TRASH: _trash_row,
+    ACTION_FILTER: _filter_row,
+}
+
+
+def process_row(service, row: dict[str, str], execute: bool) -> str:
+    action = _recognized_action(row)
+    if action is None:
         return "skip"
     if action in ("", ACTION_KEEP):
         return action or "skip"
 
-    email = row["from_email"]
-    print(f"[{action}] {email} ({row['count']} msgs in scanned window)")
-
-    if action == ACTION_UNSUBSCRIBE:
-        if row["has_list_unsubscribe"] == "yes":
-            ok = one_click_unsubscribe(
-                row["list_unsubscribe_url"],
-                bool(row.get("list_unsubscribe_post", "").strip()),
-            ) if execute else False
-            if execute:
-                print(f"    one-click: {'ok' if ok else 'not sent (no Post header or HTTP fail)'}")
-            if row["list_unsubscribe_url"] and not row.get("list_unsubscribe_post"):
-                print(f"    manual URL (no one-click): {row['list_unsubscribe_url']}")
-        else:
-            print("    no List-Unsubscribe header — trashing only")
-        n = trash_messages_from(service, email, execute)
-        print(f"    trashed {n} existing messages")
-        return action
-
-    if action == ACTION_TRASH:
-        n = trash_messages_from(service, email, execute)
-        print(f"    trashed {n} messages")
-        return action
-
-    if action == ACTION_FILTER:
-        create_auto_trash_filter(service, email, execute)
-        n = trash_messages_from(service, email, execute)
-        print(f"    filter created + trashed {n} existing")
-        return action
-
-    return "skip"
+    print(f"[{action}] {row['from_email']} ({row['count']} msgs in scanned window)")
+    _ACTION_HANDLERS[action](service, row, execute)
+    return action
 
 
 def run(csv_path: Path, execute: bool) -> None:
@@ -149,16 +172,25 @@ def run(csv_path: Path, execute: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Act on reviewed senders.csv")
-    parser.add_argument("--csv", type=Path, default=SCRIPT_DIR / "senders.csv")
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=SCRIPT_DIR / "senders.csv",
+        help=f"Reviewed senders CSV to act on ({PATH_CONFINEMENT_HELP})",
+    )
     parser.add_argument(
         "--execute",
         action="store_true",
         help="Actually perform actions (default: dry run)",
     )
     args = parser.parse_args()
-    if not args.csv.exists():
-        sys.exit(f"Missing {args.csv}. Run recon.py first.")
-    run(args.csv, args.execute)
+    try:
+        csv_path = resolve_within_directory(args.csv, SCRIPT_DIR)
+    except ValueError as e:
+        sys.exit(str(e))
+    if not csv_path.exists():
+        sys.exit(f"Missing {csv_path}. Run recon.py first.")
+    run(csv_path, args.execute)
 
 
 if __name__ == "__main__":

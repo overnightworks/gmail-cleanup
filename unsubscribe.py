@@ -16,12 +16,14 @@ from __future__ import annotations
 import argparse
 import csv
 import socket
+import sys
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
+
 HTTP_TIMEOUT = 10
 
 
@@ -67,13 +69,22 @@ def unsubscribe(url: str) -> tuple[bool, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fire one-click unsubscribes")
-    parser.add_argument("--csv", type=Path, default=SCRIPT_DIR / "senders-full.csv")
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=SCRIPT_DIR / "senders-full.csv",
+        help=f"Sender CSV to read candidates from ({PATH_CONFINEMENT_HELP})",
+    )
     parser.add_argument("--recent-days", type=int, default=365)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    try:
+        csv_path = resolve_within_directory(args.csv, SCRIPT_DIR)
+    except ValueError as e:
+        sys.exit(str(e))
 
     cutoff = date.today() - timedelta(days=args.recent_days)
-    candidates = load_candidates(args.csv, cutoff)
+    candidates = load_candidates(csv_path, cutoff)
     print(f"{len(candidates)} active senders with one-click unsubscribe (newest >= {cutoff})")
 
     if not args.execute:

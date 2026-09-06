@@ -9,7 +9,6 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCRIPT_DIR = Path(__file__).resolve().parent
 SECRETS_DIR = Path.home() / ".secrets" / "gmail-cleanup"
 CREDENTIALS_FILE = SECRETS_DIR / "credentials.json"
 

@@ -1,0 +1,406 @@
+from __future__ import annotations
+
+import sys
+import urllib.error
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+import act
+
+MARKETING_SENDER = {
+    "action": "unsubscribe",
+    "from_email": "promo@example.com",
+    "count": "3",
+    "has_list_unsubscribe": "yes",
+    "list_unsubscribe_url": "https://example.com/u",
+    "list_unsubscribe_post": "One-Click",
+}
+
+
+@pytest.fixture
+def row(build_senders_row: Callable[..., dict[str, str]]) -> Callable[..., dict[str, str]]:
+    """Build a reviewed CSV row for a marketing sender, overriding what a test cares about."""
+
+    def build(**overrides: str) -> dict[str, str]:
+        return build_senders_row(**{**MARKETING_SENDER, **overrides})
+
+    return build
+
+
+def _trash_body(*message_ids: str) -> dict[str, Any]:
+    """The batchModify body act.py sends to move messages to Trash."""
+    return {"ids": list(message_ids), "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]}
+
+
+# --- one_click_unsubscribe -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("url", "has_post_header"),
+    [
+        pytest.param("mailto:unsub@example.com", True, id="unsubscribe url is not http"),
+        pytest.param("https://example.com/u", False, id="sender sent no List-Unsubscribe-Post"),
+    ],
+)
+def test_one_click_unsubscribe_sends_nothing_it_may_not_send(
+    monkeypatch: pytest.MonkeyPatch,
+    unreachable_urlopen: Callable[..., object],
+    url: str,
+    has_post_header: bool,
+) -> None:
+    monkeypatch.setattr(act.urllib.request, "urlopen", unreachable_urlopen)
+
+    assert act.one_click_unsubscribe(url, has_post_header=has_post_header) is False
+
+
+@pytest.mark.parametrize(
+    ("status", "succeeded"),
+    [
+        pytest.param(200, True, id="2xx counts as unsubscribed"),
+        pytest.param(500, False, id="5xx counts as failed"),
+    ],
+)
+def test_one_click_unsubscribe_follows_the_response_status(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_urlopen: Callable[[int], Callable[..., object]],
+    status: int,
+    succeeded: bool,
+) -> None:
+    monkeypatch.setattr(act.urllib.request, "urlopen", fake_urlopen(status))
+
+    assert act.one_click_unsubscribe("https://example.com/u", has_post_header=True) is succeeded
+
+
+def test_one_click_unsubscribe_catches_a_network_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def raise_url_error(req: object, timeout: int) -> None:
+        raise urllib.error.URLError("boom")
+
+    monkeypatch.setattr(act.urllib.request, "urlopen", raise_url_error)
+
+    assert act.one_click_unsubscribe("https://example.com/u", has_post_header=True) is False
+    assert "one-click POST failed" in capsys.readouterr().out
+
+
+# --- process_row -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        pytest.param("", "skip", id="blank action is skipped"),
+        pytest.param("keep", "keep", id="keep is counted as kept"),
+    ],
+)
+def test_process_row_leaves_the_sender_untouched(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    action: str,
+    expected: str,
+) -> None:
+    service = fake_gmail_service_builder({})
+
+    assert act.process_row(service, row(action=action), execute=True) == expected
+    assert service.batch_modify_calls == []
+
+
+def test_process_row_skips_and_reports_an_action_it_does_not_know(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({})
+
+    assert act.process_row(service, row(action="delete-forever"), execute=True) == "skip"
+    assert "unknown action 'delete-forever'" in capsys.readouterr().out
+    assert service.batch_modify_calls == []
+
+
+def test_process_row_accepts_an_action_written_with_stray_case_and_whitespace(
+    fake_gmail_service_builder: Callable[..., Any], row: Callable[..., dict[str, str]]
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": [{"id": "m1"}]}]})
+
+    assert act.process_row(service, row(action="  Trash "), execute=True) == "trash"
+    assert service.batch_modify_calls == [_trash_body("m1")]
+
+
+def test_process_row_trash_action_batch_modifies_under_execute(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": [{"id": "m1"}]}]})
+
+    result = act.process_row(service, row(action="trash"), execute=True)
+
+    assert result == "trash"
+    assert service.batch_modify_calls == [_trash_body("m1")]
+    assert "trashed 1 messages" in capsys.readouterr().out
+
+
+def test_process_row_trash_action_paginates_through_all_pages(
+    fake_gmail_service_builder: Callable[..., Any], row: Callable[..., dict[str, str]]
+) -> None:
+    pages = {
+        "from:promo@example.com": [
+            {"messages": [{"id": "m1"}], "nextPageToken": "1"},
+            {"messages": [{"id": "m2"}]},
+        ]
+    }
+    service = fake_gmail_service_builder(pages)
+
+    result = act.process_row(service, row(action="trash"), execute=True)
+
+    assert result == "trash"
+    assert service.batch_modify_calls == [_trash_body("m1"), _trash_body("m2")]
+
+
+def test_process_row_trash_action_dry_run_leaves_messages_untouched(
+    fake_gmail_service_builder: Callable[..., Any], row: Callable[..., dict[str, str]]
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": [{"id": "m1"}]}]})
+
+    result = act.process_row(service, row(action="trash"), execute=False)
+
+    assert result == "trash"
+    assert service.batch_modify_calls == []
+
+
+def test_process_row_filter_action_creates_a_filter_and_trashes_under_execute(
+    fake_gmail_service_builder: Callable[..., Any], row: Callable[..., dict[str, str]]
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": [{"id": "m1"}]}]})
+
+    result = act.process_row(service, row(action="filter"), execute=True)
+
+    assert result == "filter"
+    assert service.filter_create_calls == [
+        {
+            "criteria": {"from": "promo@example.com"},
+            "action": {"addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]},
+        }
+    ]
+    assert service.batch_modify_calls == [_trash_body("m1")]
+
+
+def test_process_row_filter_action_dry_run_creates_no_filter(
+    fake_gmail_service_builder: Callable[..., Any], row: Callable[..., dict[str, str]]
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": []}]})
+
+    act.process_row(service, row(action="filter"), execute=False)
+
+    assert service.filter_create_calls == []
+
+
+def test_process_row_unsubscribe_reports_a_successful_one_click(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_urlopen: Callable[[int], Callable[..., object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": []}]})
+    monkeypatch.setattr(act.urllib.request, "urlopen", fake_urlopen(200))
+
+    result = act.process_row(service, row(action="unsubscribe"), execute=True)
+
+    assert result == "unsubscribe"
+    out = capsys.readouterr().out
+    assert "one-click: ok" in out
+    assert "manual URL" not in out
+
+
+def test_process_row_unsubscribe_reports_a_failed_one_click(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_urlopen: Callable[[int], Callable[..., object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": []}]})
+    monkeypatch.setattr(act.urllib.request, "urlopen", fake_urlopen(500))
+
+    act.process_row(service, row(action="unsubscribe"), execute=True)
+
+    assert "not sent" in capsys.readouterr().out
+
+
+def test_process_row_unsubscribe_prints_the_manual_url_when_there_is_no_one_click(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    unreachable_urlopen: Callable[..., object],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": []}]})
+    monkeypatch.setattr(act.urllib.request, "urlopen", unreachable_urlopen)
+
+    act.process_row(
+        service, row(action="unsubscribe", list_unsubscribe_post=""), execute=True
+    )
+
+    out = capsys.readouterr().out
+    assert "not sent" in out
+    assert "manual URL (no one-click): https://example.com/u" in out
+
+
+def test_process_row_unsubscribe_dry_run_does_not_fire_the_one_click(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    unreachable_urlopen: Callable[..., object],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": []}]})
+    monkeypatch.setattr(act.urllib.request, "urlopen", unreachable_urlopen)
+
+    act.process_row(service, row(action="unsubscribe"), execute=False)
+
+    assert "one-click:" not in capsys.readouterr().out
+
+
+def test_process_row_unsubscribe_without_list_unsubscribe_header_only_trashes(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({"from:promo@example.com": [{"messages": []}]})
+
+    act.process_row(service, row(action="unsubscribe", has_list_unsubscribe="no"), execute=True)
+
+    assert "no List-Unsubscribe header" in capsys.readouterr().out
+
+
+# --- run() -------------------------------------------------------------------
+
+
+def test_run_trashes_multiple_senders_by_their_own_query(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
+) -> None:
+    pages = {
+        "from:a@example.com": [{"messages": [{"id": "a1"}, {"id": "a2"}]}],
+        "from:b@example.com": [{"messages": [{"id": "b1"}]}],
+    }
+    service = fake_gmail_service_builder(pages)
+    monkeypatch.setattr(act, "get_credentials", lambda scopes, token_file: object())
+    monkeypatch.setattr(act, "build", lambda *args, **kwargs: service)
+
+    csv_path = tmp_path / "senders.csv"
+    write_csv_of_senders(
+        csv_path,
+        [
+            row(action="trash", from_email="a@example.com"),
+            row(action="trash", from_email="b@example.com"),
+        ],
+    )
+
+    act.run(csv_path, execute=True)
+
+    assert service.batch_modify_calls == [_trash_body("a1", "a2"), _trash_body("b1")]
+
+
+def test_run_counts_an_api_error_as_skipped_and_acts_on_the_next_sender(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_gmail_service_builder: Callable[..., Any],
+    list_failure: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pages = {
+        "from:broken@example.com": list_failure(500),
+        "from:ok@example.com": [{"messages": [{"id": "ok1"}]}],
+    }
+    service = fake_gmail_service_builder(pages)
+    monkeypatch.setattr(act, "get_credentials", lambda scopes, token_file: object())
+    monkeypatch.setattr(act, "build", lambda *args, **kwargs: service)
+
+    csv_path = tmp_path / "senders.csv"
+    write_csv_of_senders(
+        csv_path,
+        [
+            row(action="trash", from_email="broken@example.com"),
+            row(action="trash", from_email="ok@example.com"),
+        ],
+    )
+
+    act.run(csv_path, execute=True)
+
+    assert service.batch_modify_calls == [_trash_body("ok1")]
+    out = capsys.readouterr().out
+    assert "API error" in out
+    assert "skip: 1" in out
+    assert "trash: 1" in out
+
+
+def test_run_dry_run_prints_the_dry_run_notice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    service = fake_gmail_service_builder({"from:a@example.com": [{"messages": []}]})
+    monkeypatch.setattr(act, "get_credentials", lambda scopes, token_file: object())
+    monkeypatch.setattr(act, "build", lambda *args, **kwargs: service)
+
+    csv_path = tmp_path / "senders.csv"
+    write_csv_of_senders(csv_path, [row(action="trash", from_email="a@example.com")])
+
+    act.run(csv_path, execute=False)
+
+    assert "DRY RUN" in capsys.readouterr().out
+
+
+# --- main() --------------------------------------------------------------
+
+
+def test_main_validates_and_forwards_the_parsed_csv_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    row: Callable[..., dict[str, str]],
+    write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
+) -> None:
+    monkeypatch.setattr(act, "SCRIPT_DIR", tmp_path)
+    csv_path = tmp_path / "senders.csv"
+    write_csv_of_senders(csv_path, [row()])
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(act, "run", lambda *args: calls.append(args))
+    monkeypatch.setattr(sys, "argv", ["act.py", "--csv", str(csv_path), "--execute"])
+
+    act.main()
+
+    assert calls == [(csv_path.resolve(), True)]
+
+
+def test_main_refuses_a_csv_path_outside_the_script_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "scripts"
+    allowed.mkdir()
+    monkeypatch.setattr(act, "SCRIPT_DIR", allowed)
+    outside = tmp_path / "elsewhere" / "senders.csv"
+    monkeypatch.setattr(sys, "argv", ["act.py", "--csv", str(outside)])
+
+    with pytest.raises(SystemExit, match="refusing path outside"):
+        act.main()
+
+
+def test_main_exits_when_the_csv_is_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(act, "SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["act.py", "--csv", str(tmp_path / "missing.csv")])
+
+    with pytest.raises(SystemExit, match="Missing"):
+        act.main()
