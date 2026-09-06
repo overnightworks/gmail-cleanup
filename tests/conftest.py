@@ -1,25 +1,33 @@
 """Shared test fixtures for the Gmail cleanup scripts.
 
-Two things live here. A fake Gmail service standing in for the googleapiclient
-chains act.py and recon.py use — ``messages().list(...)`` with its
+What every script test shares lives here. A fake Gmail service standing in for
+the googleapiclient chains the scripts use — ``messages().list(...)`` with its
 ``nextPageToken`` pagination, the mutating ``messages().batchModify()`` and
-``settings().filters().create()`` calls act.py fires under ``--execute``, and
-the batched ``messages().get()`` chain recon.py fetches headers with — so
-those tests run without a live Gmail API or OAuth flow. And the sender-CSV
-builders plus the fake HTTP response every script test needs.
+``settings().filters().create()`` calls act.py, setup_personal.py and
+cleanup_github_runs.py fire, the ``labels().list()``/``labels().create()``
+chain setup_personal.py ensures its label with, and the batched
+``messages().get()`` chain recon.py fetches headers with — so those tests run
+without a live Gmail API or OAuth flow. The fixtures that put that fake, and a
+local sender config, behind the boundaries the scripts reach them through. The
+builders for the shapes those calls carry — a ``messages().list()`` page, the
+batchModify body that trashes mail — and the sender-CSV builders plus the fake
+HTTP response.
 """
 
 from __future__ import annotations
 
 import csv
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
 from googleapiclient.errors import HttpError
 
+import classify
 from recon import CSV_FIELDNAMES
 
 
@@ -174,15 +182,38 @@ class _FakeMessagesResource:
         return _FakeExecuteResult({})
 
 
+class _FakeLabelsResource:
+    """Mimics ``service.users().labels()``: the mailbox's labels, and creating one."""
+
+    def __init__(self, existing_labels: Sequence[dict[str, str]]) -> None:
+        self._labels = list(existing_labels)
+        self.create_calls: list[dict[str, Any]] = []
+        self.created_ids: list[str] = []
+
+    def list(self, **_kwargs: Any) -> _FakeExecuteResult:
+        return _FakeExecuteResult({"labels": list(self._labels)})
+
+    def create(self, **kwargs: Any) -> _FakeExecuteResult:
+        body = kwargs["body"]
+        self.create_calls.append(body)
+        created = {"id": f"label-{len(self._labels) + 1}", "name": body["name"]}
+        self._labels.append(created)
+        self.created_ids.append(created["id"])
+        return _FakeExecuteResult(created)
+
+
 class _FakeFiltersResource:
     """Mimics ``service.users().settings().filters()``."""
 
     def __init__(self) -> None:
         self.create_calls: list[dict[str, Any]] = []
+        self.created_ids: list[str] = []
 
     def create(self, **kwargs: Any) -> _FakeExecuteResult:
         self.create_calls.append(kwargs["body"])
-        return _FakeExecuteResult({})
+        created = {"id": f"filter-{len(self.create_calls)}"}
+        self.created_ids.append(created["id"])
+        return _FakeExecuteResult(created)
 
 
 class _FakeSettingsResource:
@@ -196,15 +227,17 @@ class _FakeSettingsResource:
 
 
 class FakeGmailService:
-    """Mimics the googleapiclient Gmail service used by act.py and recon.py."""
+    """Mimics the googleapiclient Gmail service the scripts build."""
 
     def __init__(
         self,
         pages_by_query: dict[str | None, ListOutcome],
         message_responses: dict[str, MessageOutcome] | None = None,
+        existing_labels: Sequence[dict[str, str]] = (),
     ) -> None:
         self._messages = _FakeMessagesResource(pages_by_query)
         self._settings = _FakeSettingsResource()
+        self._labels = _FakeLabelsResource(existing_labels)
         self._message_responses = message_responses or {}
         self._batch_failures_fired: dict[str, int] = dict.fromkeys(self._message_responses, 0)
 
@@ -216,6 +249,9 @@ class FakeGmailService:
 
     def settings(self) -> _FakeSettingsResource:
         return self._settings
+
+    def labels(self) -> _FakeLabelsResource:
+        return self._labels
 
     def new_batch_http_request(
         self, *, callback: Callable[[str, dict[str, Any] | None, Exception | None], None]
@@ -231,13 +267,29 @@ class FakeGmailService:
 
     @property
     def filter_create_calls(self) -> list[dict[str, Any]]:
-        """Bodies passed to ``settings().filters().create()`` — act.py's filter side effect."""
+        """Bodies passed to ``settings().filters().create()`` — the filter side effect."""
         return self._settings.filters().create_calls
+
+    @property
+    def label_create_calls(self) -> list[dict[str, Any]]:
+        """Bodies passed to ``labels().create()`` — setup_personal.py's label side effect."""
+        return self._labels.create_calls
+
+    @property
+    def created_filter_ids(self) -> list[str]:
+        """Ids ``settings().filters().create()`` minted, in the order the API handed them back."""
+        return self._settings.filters().created_ids
+
+    @property
+    def created_label_ids(self) -> list[str]:
+        """Ids ``labels().create()`` minted, in the order the API handed them back."""
+        return self._labels.created_ids
 
 
 def build_fake_gmail_service(
     pages_by_query: dict[str | None, ListOutcome],
     message_responses: dict[str, MessageOutcome] | None = None,
+    existing_labels: Sequence[dict[str, str]] = (),
 ) -> FakeGmailService:
     """Build a fake Gmail service for ``messages().list()`` and the ``get()``/batch chain.
 
@@ -248,8 +300,32 @@ def build_fake_gmail_service(
     date and tests should not have to reproduce it, while a multi-sender act.py
     test needs distinct pages per ``from:`` query. ``message_responses`` maps a
     message id to its ``messages().get`` response body or to a failure outcome.
+    ``existing_labels`` are the labels the mailbox already carries, each an
+    ``{"id", "name"}`` entry as ``labels().list()`` returns them.
     """
-    return FakeGmailService(pages_by_query, message_responses)
+    return FakeGmailService(pages_by_query, message_responses, existing_labels)
+
+
+TRASH_LABEL_CHANGE = {"addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]}
+"""The label change that moves mail to Trash.
+
+What act.py, setup_personal.py and cleanup_github_runs.py send to
+``messages().batchModify()``, and what cleanup_github_runs.py's auto-trash
+filter applies to future mail.
+"""
+
+
+def messages_list_page(*message_ids: str, next_page_token: str | None = None) -> dict[str, Any]:
+    """One ``messages().list()`` page holding these ids, tokened when a page follows it."""
+    page: dict[str, Any] = {"messages": [{"id": message_id} for message_id in message_ids]}
+    if next_page_token is not None:
+        page["nextPageToken"] = next_page_token
+    return page
+
+
+def trash_message_body(*message_ids: str) -> dict[str, Any]:
+    """The ``messages().batchModify()`` body that moves these messages to Trash."""
+    return {"ids": list(message_ids), **TRASH_LABEL_CHANGE}
 
 
 class FakeHttpResponse:
@@ -283,6 +359,73 @@ def write_senders_csv(path: Path, rows: list[dict[str, str]]) -> None:
 def fake_gmail_service_builder() -> Callable[..., FakeGmailService]:
     """Expose ``build_fake_gmail_service`` so tests need not import the conftest module."""
     return build_fake_gmail_service
+
+
+@pytest.fixture
+def build_messages_page() -> Callable[..., dict[str, Any]]:
+    """Expose ``messages_list_page`` so tests need not import the conftest module."""
+    return messages_list_page
+
+
+@pytest.fixture
+def build_trash_body() -> Callable[..., dict[str, Any]]:
+    """Expose ``trash_message_body`` so tests need not import the conftest module."""
+    return trash_message_body
+
+
+@pytest.fixture
+def trash_label_change() -> dict[str, Any]:
+    """The label change a trashing call applies, for tests asserting a body around it."""
+    return dict(TRASH_LABEL_CHANGE)
+
+
+@pytest.fixture
+def personal_senders_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[..., None]:
+    """Install a local sender config in place of the operator's own ~/.secrets file.
+
+    classify.py owns where that file lives, and setup_personal.py reads it
+    through classify.py, so both scripts' tests point the same name here.
+    """
+
+    def configure(
+        personal_senders: Sequence[str] = (),
+        trash_senders: Sequence[str] = (),
+        personal_keep_patterns: Sequence[str] = (),
+    ) -> None:
+        config_file = tmp_path / "personal_senders.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "personal_senders": list(personal_senders),
+                    "trash_senders": list(trash_senders),
+                    "personal_keep_patterns": list(personal_keep_patterns),
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(classify, "PERSONAL_SENDERS_FILE", config_file)
+
+    return configure
+
+
+@pytest.fixture
+def gmail_service_behind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[ModuleType, FakeGmailService], None]:
+    """Put a fake service behind a script's OAuth and ``build()`` boundary.
+
+    The scripts reach Gmail through ``get_credentials`` and ``build``; this is
+    the one place a test replaces that pair, so main() runs end to end without
+    a token file or a network call.
+    """
+
+    def install(module: ModuleType, service: FakeGmailService) -> None:
+        monkeypatch.setattr(module, "get_credentials", lambda scopes, token_file: object())
+        monkeypatch.setattr(module, "build", lambda *args, **kwargs: service)
+
+    return install
 
 
 @pytest.fixture

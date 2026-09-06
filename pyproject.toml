@@ -25,7 +25,9 @@ testpaths = ["tests"]
 # The scripts are flat modules at the repository root (no package); this puts
 # the root on sys.path so tests can `import classify` etc. without one.
 pythonpath = ["."]
-addopts = "--cov=. --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml"
+# The floor is 100 %: every module is covered except the process entry points
+# and the OAuth browser flow, which carry their reason at the exclusion.
+addopts = "--cov=. --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=100"
 
 [tool.coverage.run]
 omit = ["tests/*"]

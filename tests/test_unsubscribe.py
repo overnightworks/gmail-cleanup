@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import urllib.error
+import urllib.request
 from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
@@ -113,16 +114,13 @@ def test_main_dry_run_lists_candidates_without_sending_anything(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
+    unreachable_urlopen: Callable[..., object],
 ) -> None:
     monkeypatch.setattr(unsubscribe, "SCRIPT_DIR", tmp_path)
     csv_path = tmp_path / "senders-full.csv"
     write_csv_of_senders(csv_path, [CANDIDATE_ROW])
     monkeypatch.setattr(sys, "argv", ["unsubscribe.py", "--csv", str(csv_path)])
-
-    def fail_if_called(url: str) -> None:
-        raise AssertionError("dry run must not send any unsubscribe request")
-
-    monkeypatch.setattr(unsubscribe, "unsubscribe", fail_if_called)
+    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", unreachable_urlopen)
 
     unsubscribe.main()
 
@@ -136,6 +134,7 @@ def test_main_execute_counts_successes_and_failures(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
+    fake_urlopen: Callable[[int], Callable[..., object]],
 ) -> None:
     monkeypatch.setattr(unsubscribe, "SCRIPT_DIR", tmp_path)
     csv_path = tmp_path / "senders-full.csv"
@@ -151,11 +150,12 @@ def test_main_execute_counts_successes_and_failures(
         ],
     )
     monkeypatch.setattr(sys, "argv", ["unsubscribe.py", "--csv", str(csv_path), "--execute"])
-    monkeypatch.setattr(
-        unsubscribe,
-        "unsubscribe",
-        lambda url: (True, "HTTP 200") if "fail" not in url else (False, "HTTP 500"),
-    )
+
+    def urlopen(request: urllib.request.Request, timeout: int) -> object:
+        status = 500 if request.full_url.endswith("/fail") else 200
+        return fake_urlopen(status)(request, timeout)
+
+    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", urlopen)
 
     unsubscribe.main()
 

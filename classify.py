@@ -14,13 +14,13 @@ import argparse
 import csv
 import json
 import re
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from auth import SECRETS_DIR
-
-SCRIPT_DIR = Path(__file__).resolve().parent
+from paths import PATH_CONFINEMENT_HELP, SCRIPT_DIR, resolve_within_directory
 
 # Local, gitignored file holding personal and third-party sender data; see
 # personal_senders.example.json for its shape and README.md for setup.
@@ -327,16 +327,31 @@ def classify(email: str, has_unsub: str, personal_keep_patterns: Sequence[str] =
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Auto-classify senders.csv")
-    parser.add_argument("--csv", type=Path, default=SCRIPT_DIR / "senders-full.csv")
-    parser.add_argument("--out", type=Path, default=None, help="Output CSV (default: in-place)")
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=SCRIPT_DIR / "senders-full.csv",
+        help=f"Sender CSV to classify ({PATH_CONFINEMENT_HELP})",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"Where to write the classified CSV, default in place ({PATH_CONFINEMENT_HELP})",
+    )
     args = parser.parse_args()
-    out_path = args.out or args.csv
+    try:
+        csv_path = resolve_within_directory(args.csv, SCRIPT_DIR)
+        out_path = resolve_within_directory(args.out, SCRIPT_DIR) if args.out else csv_path
+    except ValueError as e:
+        sys.exit(str(e))
 
     config = load_personal_senders_config()
 
-    with args.csv.open("r", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-        fieldnames = list(rows[0].keys()) if rows else []
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        fieldnames = reader.fieldnames or []
 
     counts = {"keep": 0, "trash": 0, "filter": 0}
     for row in rows:

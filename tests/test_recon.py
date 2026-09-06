@@ -31,11 +31,12 @@ def test_parse_list_unsubscribe(header_value: str, expected: str) -> None:
 
 def test_iter_message_ids_paginates_and_stops_at_max_messages(
     fake_gmail_service_builder: Callable[..., Any],
+    build_messages_page: Callable[..., dict[str, Any]],
 ) -> None:
     pages = {
         None: [
-            {"messages": [{"id": "m1"}, {"id": "m2"}], "nextPageToken": "1"},
-            {"messages": [{"id": "m3"}, {"id": "m4"}]},
+            build_messages_page("m1", "m2", next_page_token="1"),
+            build_messages_page("m3", "m4"),
         ]
     }
     service = fake_gmail_service_builder(pages)
@@ -47,8 +48,9 @@ def test_iter_message_ids_paginates_and_stops_at_max_messages(
 
 def test_iter_message_ids_stops_when_gmail_reports_no_more_pages(
     fake_gmail_service_builder: Callable[..., Any],
+    build_messages_page: Callable[..., dict[str, Any]],
 ) -> None:
-    pages = {None: [{"messages": [{"id": "m1"}]}]}
+    pages = {None: [build_messages_page("m1")]}
     service = fake_gmail_service_builder(pages)
 
     ids = list(recon.iter_message_ids(service, days=30, max_messages=100, include_spam_trash=True))
@@ -66,8 +68,9 @@ def test_iter_message_ids_returns_nothing_when_max_messages_is_zero(
 
 def test_iter_message_ids_returns_nothing_when_gmail_has_no_matches(
     fake_gmail_service_builder: Callable[..., Any],
+    build_messages_page: Callable[..., dict[str, Any]],
 ) -> None:
-    service = fake_gmail_service_builder({None: [{"messages": []}]})
+    service = fake_gmail_service_builder({None: [build_messages_page()]})
 
     assert list(recon.iter_message_ids(service, days=30, max_messages=10, include_spam_trash=False)) == []
 
@@ -208,20 +211,20 @@ def test_write_csv_sorts_by_count_and_formats_known_and_unknown_dates(tmp_path: 
 
 def test_run_recon_writes_a_csv_of_discovered_senders(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     fake_gmail_service_builder: Callable[..., Any],
+    gmail_service_behind: Callable[..., None],
+    build_messages_page: Callable[..., dict[str, Any]],
 ) -> None:
     service = fake_gmail_service_builder(
-        {None: [{"messages": [{"id": "m1"}]}]},
+        {None: [build_messages_page("m1")]},
         message_responses={
             "m1": _get_response(
                 headers=[{"name": "From", "value": "promo@example.com"}], internal_date="1000"
             )
         },
     )
-    monkeypatch.setattr(recon, "get_credentials", lambda scopes, token_file: object())
-    monkeypatch.setattr(recon, "build", lambda *args, **kwargs: service)
+    gmail_service_behind(recon, service)
     out_path = tmp_path / "senders.csv"
 
     recon.run_recon(days=30, max_messages=10, output_csv=out_path, include_spam_trash=False)
