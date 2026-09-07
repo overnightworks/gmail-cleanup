@@ -14,9 +14,38 @@ ALLOWLIST = check_root_layout.REPOSITORY_ALLOWLIST
 GATE = Path(check_root_layout.__file__).resolve()
 
 
+def commit_everything(repository: Path, message: str) -> None:
+    """Track what the tree holds, so the gate reads it as a tracked path.
+
+    The identity is passed per command because the fixture pins the git
+    configuration to the null device; a machine's user.name never reaches here.
+    """
+    subprocess.run(["git", "add", "--all"], cwd=repository, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=root layout gate test",
+            "-c",
+            "user.email=gate@example.invalid",
+            "commit",
+            "--quiet",
+            "--message",
+            message,
+        ],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+    )
+
+
 @pytest.fixture
 def allowlisted_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A git repository the gate is happy with, installed as the gate's own root.
+
+    Its files are committed, because tracked and untracked paths reach the gate
+    through separate git calls and a fixture that only writes would leave the
+    tracked half unasserted.
 
     The git configuration is pinned to the null device for this test and every
     process it starts: the gate asks git which untracked files are ignored, so
@@ -30,6 +59,7 @@ def allowlisted_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     (repository / "README.md").write_text("a repository the gate is happy with\n", encoding="utf-8")
     (repository / ".gitignore").write_text("senders.csv\n", encoding="utf-8")
     subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True, capture_output=True)
+    commit_everything(repository, "the allowlisted tree")
     monkeypatch.setattr(check_root_layout, "REPO_ROOT", repository)
     return repository
 
@@ -64,6 +94,17 @@ def test_the_gate_names_a_stray_root_file_and_fails(
 
     assert check_root_layout.main() == 1
     assert "NOTES.md" in capsys.readouterr().err
+
+
+def test_the_gate_names_a_committed_stray_root_file(
+    allowlisted_repository: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A stray that already landed is as red as one that never was tracked."""
+    (allowlisted_repository / "recon.py").write_text("the module left at the root\n", encoding="utf-8")
+    commit_everything(allowlisted_repository, "a stray at the root")
+
+    assert check_root_layout.main() == 1
+    assert "recon.py" in capsys.readouterr().err
 
 
 def test_the_gate_exits_non_zero_as_a_command(allowlisted_repository: Path) -> None:
