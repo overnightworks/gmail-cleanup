@@ -125,7 +125,8 @@ def test_main_dry_run_lists_candidates_without_sending_anything(
     unsubscribe.main()
 
     out = capsys.readouterr().out
-    assert "promo@example.com" in out
+    assert "would unsubscribe promo@example.com (last seen" in out
+    assert "unsubscribed" not in out
     assert "DRY RUN" in out
 
 

@@ -89,7 +89,7 @@ def main() -> None:
 
     if not args.execute:
         for row in candidates:
-            print(f"  {row['from_email']} (last seen {row['newest_date']}, {row['count']} msgs)")
+            print(f"  would unsubscribe {row['from_email']} (last seen {row['newest_date']}, {row['count']} msgs)")
         print("\nDRY RUN — re-run with --execute to actually unsubscribe.")
         return
 
