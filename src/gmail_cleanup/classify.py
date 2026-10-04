@@ -22,7 +22,7 @@ from pathlib import Path
 from .auth import SECRETS_DIR
 from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
-# Local, gitignored file holding personal and third-party sender data; the
+# Local, gitignored file holding the operator's own keep-patterns; the
 # example next to this loader shows its shape, README.md the setup.
 PERSONAL_SENDERS_FILE = SECRETS_DIR / "personal_senders.json"
 PERSONAL_SENDERS_EXAMPLE_FILE = Path(__file__).resolve().parent / "personal_senders.example.json"
@@ -258,15 +258,11 @@ NEWSLETTER_SUBDOMAIN = re.compile(
 
 @dataclass(frozen=True)
 class PersonalSendersConfig:
-    """Personal and third-party sender data, loaded from a local, gitignored file.
+    """The operator's own addresses, loaded from a local, gitignored file.
 
-    ``personal_senders`` and ``trash_senders`` back setup_personal.py's label
-    and trash actions; ``personal_keep_patterns`` extends KEEP_PATTERNS with
-    the operator's own addresses.
+    ``personal_keep_patterns`` extends KEEP_PATTERNS with them.
     """
 
-    personal_senders: tuple[str, ...]
-    trash_senders: tuple[str, ...]
     personal_keep_patterns: tuple[str, ...]
 
 
@@ -305,8 +301,6 @@ def load_personal_senders_config(path: Path | None = None) -> PersonalSendersCon
     if not isinstance(data, dict):
         raise _malformed_config_error(path, "must contain a JSON object")
     return PersonalSendersConfig(
-        personal_senders=_load_string_list_field(data, "personal_senders", path),
-        trash_senders=_load_string_list_field(data, "trash_senders", path),
         personal_keep_patterns=_load_string_list_field(data, "personal_keep_patterns", path),
     )
 

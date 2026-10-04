@@ -46,8 +46,6 @@ def test_load_personal_senders_config_reads_a_present_file(tmp_path: Path) -> No
     path.write_text(
         json.dumps(
             {
-                "personal_senders": ["a@example.com"],
-                "trash_senders": ["b@example.com"],
                 "personal_keep_patterns": [r"^a@example\.com$"],
             }
         ),
@@ -55,8 +53,6 @@ def test_load_personal_senders_config_reads_a_present_file(tmp_path: Path) -> No
     )
 
     assert load_personal_senders_config(path) == PersonalSendersConfig(
-        personal_senders=("a@example.com",),
-        trash_senders=("b@example.com",),
         personal_keep_patterns=(r"^a@example\.com$",),
     )
 
@@ -74,7 +70,7 @@ def test_load_personal_senders_config_raises_a_clear_error_when_missing(tmp_path
     "content",
     [
         pytest.param("not json", id="not_json"),
-        pytest.param(json.dumps({"personal_senders": []}), id="missing_field"),
+        pytest.param(json.dumps({}), id="missing_field"),
         pytest.param(json.dumps(["a@example.com"]), id="top_level_not_an_object"),
     ],
 )
@@ -89,29 +85,23 @@ def test_load_personal_senders_config_raises_a_clear_error_for_malformed_content
 
 
 @pytest.mark.parametrize(
-    "field_overrides",
+    "config_data",
     [
-        pytest.param({"trash_senders": "old@example.com"}, id="string_instead_of_list"),
+        pytest.param({"personal_keep_patterns": "a@example.com"}, id="string_instead_of_list"),
         pytest.param({"personal_keep_patterns": {"a": "b"}}, id="dict_instead_of_list"),
-        pytest.param({"personal_senders": ["ok@example.com", 3]}, id="non_string_element"),
+        pytest.param({"personal_keep_patterns": ["ok@example.com", 3]}, id="non_string_element"),
     ],
 )
 def test_load_personal_senders_config_raises_a_clear_error_for_wrong_typed_fields(
-    tmp_path: Path, field_overrides: dict[str, object]
+    tmp_path: Path, config_data: dict[str, object]
 ) -> None:
     """A hand-edited field that isn't a list of strings is rejected, not silently misread.
 
     Regression guard: ``tuple("old@example.com")`` would otherwise split the
-    string into single-character "senders", each trashed or kept in bulk.
+    string into single-character patterns, each keeping senders in bulk.
     """
     path = tmp_path / "personal_senders.json"
-    data: dict[str, object] = {
-        "personal_senders": ["a@example.com"],
-        "trash_senders": ["b@example.com"],
-        "personal_keep_patterns": [r"^a@example\.com$"],
-    }
-    data.update(field_overrides)
-    path.write_text(json.dumps(data), encoding="utf-8")
+    path.write_text(json.dumps(config_data), encoding="utf-8")
 
     with pytest.raises(ValueError, match=re.escape(str(path))):
         load_personal_senders_config(path)
@@ -121,8 +111,6 @@ def test_example_personal_senders_file_loads_as_a_valid_config() -> None:
     """The tracked example stays in sync with the loader's expected shape."""
     config = load_personal_senders_config(PERSONAL_SENDERS_EXAMPLE_FILE)
 
-    assert config.personal_senders
-    assert config.trash_senders
     assert config.personal_keep_patterns
 
 
