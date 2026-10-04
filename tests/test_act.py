@@ -130,7 +130,6 @@ def test_process_row_accepts_an_action_written_with_stray_case_and_whitespace(
 def test_process_row_trash_action_batch_modifies_under_execute(
     fake_gmail_service_builder: Callable[..., Any],
     row: Callable[..., dict[str, str]],
-    capsys: pytest.CaptureFixture[str],
     build_messages_page: Callable[..., dict[str, Any]],
     build_trash_body: Callable[..., dict[str, Any]],
 ) -> None:
@@ -140,7 +139,62 @@ def test_process_row_trash_action_batch_modifies_under_execute(
 
     assert result == "trash"
     assert service.batch_modify_calls == [build_trash_body("m1")]
-    assert "trashed 1 messages" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("overrides", "execute", "expected_line"),
+    [
+        pytest.param({"action": "trash"}, True, "trashed 1 messages", id="trash executed"),
+        pytest.param({"action": "trash"}, False, "would trash 1 messages", id="trash dry run"),
+        pytest.param(
+            {"action": "filter"}, True, "filter created + trashed 1 existing", id="filter executed"
+        ),
+        pytest.param(
+            {"action": "filter"},
+            False,
+            "would create filter + trash 1 existing",
+            id="filter dry run",
+        ),
+        pytest.param(
+            {"action": "unsubscribe"},
+            True,
+            "trashed 1 existing messages",
+            id="one-click unsubscribe executed",
+        ),
+        pytest.param(
+            {"action": "unsubscribe"},
+            False,
+            "would unsubscribe (one-click) and trash 1 existing",
+            id="one-click unsubscribe dry run",
+        ),
+        pytest.param(
+            {"action": "unsubscribe", "list_unsubscribe_post": ""},
+            False,
+            "would trash 1 existing messages",
+            id="unsubscribe without one-click dry run",
+        ),
+    ],
+)
+def test_process_row_reports_the_past_tense_only_under_execute(
+    fake_gmail_service_builder: Callable[..., Any],
+    row: Callable[..., dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_urlopen: Callable[[int], Callable[..., object]],
+    capsys: pytest.CaptureFixture[str],
+    build_messages_page: Callable[..., dict[str, Any]],
+    overrides: dict[str, str],
+    execute: bool,
+    expected_line: str,
+) -> None:
+    """A dry-run count reads as a plan, so nobody takes it for work already done."""
+    service = fake_gmail_service_builder({"from:promo@example.com": [build_messages_page("m1")]})
+    monkeypatch.setattr(act.urllib.request, "urlopen", fake_urlopen(200))
+
+    act.process_row(service, row(**overrides), execute=execute)
+
+    out = capsys.readouterr().out
+    assert f"    {expected_line}\n" in out
+    assert execute or "trashed" not in out
 
 
 def test_process_row_trash_action_paginates_through_all_pages(

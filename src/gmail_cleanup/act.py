@@ -31,11 +31,14 @@ ACTION_KEEP = "keep"
 VALID_ACTIONS = {ACTION_UNSUBSCRIBE, ACTION_TRASH, ACTION_FILTER, ACTION_KEEP, ""}
 
 
+def offers_one_click(url: str, has_post_header: bool) -> bool:
+    """Whether the sender supports an RFC 8058 one-click POST to ``url``."""
+    return url.startswith("http") and has_post_header
+
+
 def one_click_unsubscribe(url: str, has_post_header: bool) -> bool:
     """RFC 8058 one-click POST if List-Unsubscribe-Post header was present."""
-    if not url.startswith("http"):
-        return False
-    if not has_post_header:
+    if not offers_one_click(url, has_post_header):
         return False
     try:
         req = urllib.request.Request(
@@ -93,37 +96,46 @@ def _recognized_action(row: dict[str, str]) -> str | None:
     return action
 
 
+def _report(execute: bool, done: str, planned: str) -> None:
+    """Print what happened under --execute, and what would happen in a dry run."""
+    print(f"    {done if execute else planned}")
+
+
 def _unsubscribe_row(service, row: dict[str, str], execute: bool) -> None:
     email = row["from_email"]
-    if row["has_list_unsubscribe"] == "yes":
-        ok = (
-            one_click_unsubscribe(
-                row["list_unsubscribe_url"],
-                bool(row.get("list_unsubscribe_post", "").strip()),
-            )
-            if execute
-            else False
-        )
+    url = row["list_unsubscribe_url"]
+    has_post_header = bool(row.get("list_unsubscribe_post", "").strip())
+    has_list_unsubscribe = row["has_list_unsubscribe"] == "yes"
+    if has_list_unsubscribe:
         if execute:
+            ok = one_click_unsubscribe(url, has_post_header)
             print(f"    one-click: {'ok' if ok else 'not sent (no Post header or HTTP fail)'}")
-        if row["list_unsubscribe_url"] and not row.get("list_unsubscribe_post"):
-            print(f"    manual URL (no one-click): {row['list_unsubscribe_url']}")
+        if url and not row.get("list_unsubscribe_post"):
+            print(f"    manual URL (no one-click): {url}")
     else:
         print("    no List-Unsubscribe header — trashing only")
     n = trash_messages_from(service, email, execute)
-    print(f"    trashed {n} existing messages")
+    if has_list_unsubscribe and offers_one_click(url, has_post_header):
+        planned = f"would unsubscribe (one-click) and trash {n} existing"
+    else:
+        planned = f"would trash {n} existing messages"
+    _report(execute, done=f"trashed {n} existing messages", planned=planned)
 
 
 def _trash_row(service, row: dict[str, str], execute: bool) -> None:
     n = trash_messages_from(service, row["from_email"], execute)
-    print(f"    trashed {n} messages")
+    _report(execute, done=f"trashed {n} messages", planned=f"would trash {n} messages")
 
 
 def _filter_row(service, row: dict[str, str], execute: bool) -> None:
     email = row["from_email"]
     create_auto_trash_filter(service, email, execute)
     n = trash_messages_from(service, email, execute)
-    print(f"    filter created + trashed {n} existing")
+    _report(
+        execute,
+        done=f"filter created + trashed {n} existing",
+        planned=f"would create filter + trash {n} existing",
+    )
 
 
 _ACTION_HANDLERS: dict[str, Callable[[Any, dict[str, str], bool], None]] = {
