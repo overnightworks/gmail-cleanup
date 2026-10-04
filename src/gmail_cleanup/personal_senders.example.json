@@ -1,11 +1,4 @@
 {
-  "personal_senders": [
-    "friend-1@example.com",
-    "friend-2@example.com"
-  ],
-  "trash_senders": [
-    "old-contact@example.com"
-  ],
   "personal_keep_patterns": [
     "^friend-1@example\\.com$"
   ]

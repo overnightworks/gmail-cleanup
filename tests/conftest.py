@@ -3,9 +3,7 @@
 What every script test shares lives here. A fake Gmail service standing in for
 the googleapiclient chains the scripts use — ``messages().list(...)`` with its
 ``nextPageToken`` pagination, the mutating ``messages().batchModify()`` and
-``settings().filters().create()`` calls act.py, setup_personal.py and
-cleanup_github_runs.py fire, the ``labels().list()``/``labels().create()``
-chain setup_personal.py ensures its label with, and the batched
+``settings().filters().create()`` calls act.py fires, and the batched
 ``messages().get()`` chain recon.py fetches headers with — so those tests run
 without a live Gmail API or OAuth flow. The fixtures that put that fake, and a
 local sender config, behind the boundaries the scripts reach them through. The
@@ -182,38 +180,15 @@ class _FakeMessagesResource:
         return _FakeExecuteResult({})
 
 
-class _FakeLabelsResource:
-    """Mimics ``service.users().labels()``: the mailbox's labels, and creating one."""
-
-    def __init__(self, existing_labels: Sequence[dict[str, str]]) -> None:
-        self._labels = list(existing_labels)
-        self.create_calls: list[dict[str, Any]] = []
-        self.created_ids: list[str] = []
-
-    def list(self, **_kwargs: Any) -> _FakeExecuteResult:
-        return _FakeExecuteResult({"labels": list(self._labels)})
-
-    def create(self, **kwargs: Any) -> _FakeExecuteResult:
-        body = kwargs["body"]
-        self.create_calls.append(body)
-        created = {"id": f"label-{len(self._labels) + 1}", "name": body["name"]}
-        self._labels.append(created)
-        self.created_ids.append(created["id"])
-        return _FakeExecuteResult(created)
-
-
 class _FakeFiltersResource:
     """Mimics ``service.users().settings().filters()``."""
 
     def __init__(self) -> None:
         self.create_calls: list[dict[str, Any]] = []
-        self.created_ids: list[str] = []
 
     def create(self, **kwargs: Any) -> _FakeExecuteResult:
         self.create_calls.append(kwargs["body"])
-        created = {"id": f"filter-{len(self.create_calls)}"}
-        self.created_ids.append(created["id"])
-        return _FakeExecuteResult(created)
+        return _FakeExecuteResult({"id": f"filter-{len(self.create_calls)}"})
 
 
 class _FakeSettingsResource:
@@ -233,11 +208,9 @@ class FakeGmailService:
         self,
         pages_by_query: dict[str | None, ListOutcome],
         message_responses: dict[str, MessageOutcome] | None = None,
-        existing_labels: Sequence[dict[str, str]] = (),
     ) -> None:
         self._messages = _FakeMessagesResource(pages_by_query)
         self._settings = _FakeSettingsResource()
-        self._labels = _FakeLabelsResource(existing_labels)
         self._message_responses = message_responses or {}
         self._batch_failures_fired: dict[str, int] = dict.fromkeys(self._message_responses, 0)
 
@@ -249,9 +222,6 @@ class FakeGmailService:
 
     def settings(self) -> _FakeSettingsResource:
         return self._settings
-
-    def labels(self) -> _FakeLabelsResource:
-        return self._labels
 
     def new_batch_http_request(
         self, *, callback: Callable[[str, dict[str, Any] | None, Exception | None], None]
@@ -270,26 +240,10 @@ class FakeGmailService:
         """Bodies passed to ``settings().filters().create()`` — the filter side effect."""
         return self._settings.filters().create_calls
 
-    @property
-    def label_create_calls(self) -> list[dict[str, Any]]:
-        """Bodies passed to ``labels().create()`` — setup_personal.py's label side effect."""
-        return self._labels.create_calls
-
-    @property
-    def created_filter_ids(self) -> list[str]:
-        """Ids ``settings().filters().create()`` minted, in the order the API handed them back."""
-        return self._settings.filters().created_ids
-
-    @property
-    def created_label_ids(self) -> list[str]:
-        """Ids ``labels().create()`` minted, in the order the API handed them back."""
-        return self._labels.created_ids
-
 
 def build_fake_gmail_service(
     pages_by_query: dict[str | None, ListOutcome],
     message_responses: dict[str, MessageOutcome] | None = None,
-    existing_labels: Sequence[dict[str, str]] = (),
 ) -> FakeGmailService:
     """Build a fake Gmail service for ``messages().list()`` and the ``get()``/batch chain.
 
@@ -300,17 +254,14 @@ def build_fake_gmail_service(
     date and tests should not have to reproduce it, while a multi-sender act.py
     test needs distinct pages per ``from:`` query. ``message_responses`` maps a
     message id to its ``messages().get`` response body or to a failure outcome.
-    ``existing_labels`` are the labels the mailbox already carries, each an
-    ``{"id", "name"}`` entry as ``labels().list()`` returns them.
     """
-    return FakeGmailService(pages_by_query, message_responses, existing_labels)
+    return FakeGmailService(pages_by_query, message_responses)
 
 
 TRASH_LABEL_CHANGE = {"addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]}
 """The label change that moves mail to Trash.
 
-What act.py, setup_personal.py and cleanup_github_runs.py send to
-``messages().batchModify()``, and what cleanup_github_runs.py's auto-trash
+What act.py sends to ``messages().batchModify()``, and what its auto-trash
 filter applies to future mail.
 """
 
@@ -385,21 +336,14 @@ def personal_senders_config(
 ) -> Callable[..., None]:
     """Install a local sender config in place of the operator's own ~/.secrets file.
 
-    classify.py owns where that file lives, and setup_personal.py reads it
-    through classify.py, so both scripts' tests point the same name here.
+    classify.py owns where that file lives, so its tests point that name here.
     """
 
-    def configure(
-        personal_senders: Sequence[str] = (),
-        trash_senders: Sequence[str] = (),
-        personal_keep_patterns: Sequence[str] = (),
-    ) -> None:
+    def configure(personal_keep_patterns: Sequence[str] = ()) -> None:
         config_file = tmp_path / "personal_senders.json"
         config_file.write_text(
             json.dumps(
                 {
-                    "personal_senders": list(personal_senders),
-                    "trash_senders": list(trash_senders),
                     "personal_keep_patterns": list(personal_keep_patterns),
                 }
             ),

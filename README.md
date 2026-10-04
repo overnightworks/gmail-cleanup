@@ -89,16 +89,15 @@ Split on purpose — recon can never modify your mailbox.
 
 - `~/.secrets/gmail-cleanup/credentials.json` — OAuth client secret, lives outside the repo.
 - `~/.secrets/gmail-cleanup/token_*.json` — cached user tokens, same folder.
-- `~/.secrets/gmail-cleanup/personal_senders.json` — your personal and third-party sender
-  data (see below). `.gitignore`d as a fallback if it ever ends up in the repo directory.
+- `~/.secrets/gmail-cleanup/personal_senders.json` — your personal keep-patterns
+  (see below). `.gitignore`d as a fallback if it ever ends up in the repo directory.
 - `senders.csv` — your working CSV. `.gitignore`d.
 
-## Personal senders
+## Personal keep-patterns
 
-`gmail_cleanup.classify` and `gmail_cleanup.setup_personal` read personal addresses, the trash-list
-of old acquaintances, and extra keep-patterns for your own addresses from
-`~/.secrets/gmail-cleanup/personal_senders.json` — this keeps other people's
-addresses out of tracked source. Set it up once:
+`gmail_cleanup.classify` reads extra keep-patterns for your own addresses from
+`~/.secrets/gmail-cleanup/personal_senders.json` — this keeps your addresses
+out of tracked source. Set it up once:
 
 ```bash
 mkdir -p ~/.secrets/gmail-cleanup
@@ -106,12 +105,8 @@ cp src/gmail_cleanup/personal_senders.example.json ~/.secrets/gmail-cleanup/pers
 # edit ~/.secrets/gmail-cleanup/personal_senders.json with your own addresses
 ```
 
-The file has three fields:
+Its one field, `personal_keep_patterns`, holds regexes `classify` treats as keep,
+alongside the generic service patterns already in `KEEP_PATTERNS`.
 
-- `personal_senders` — addresses `setup_personal` labels "Personal" and filters.
-- `trash_senders` — addresses `setup_personal` trashes outright.
-- `personal_keep_patterns` — extra regexes `classify` treats as keep, alongside
-  the generic service patterns already in `KEEP_PATTERNS`.
-
-Running either script without this file fails immediately with an error naming
+Running `classify` without this file fails immediately with an error naming
 the missing file and the example.
