@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 
 from gmail_cleanup import auth
@@ -88,6 +89,38 @@ def token_endpoint_granting(
     return grant
 
 
+@pytest.fixture
+def token_endpoint_refusing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[str], None]:
+    """Refuse the next refresh with the OAuth ``error`` code, as Google's endpoint would."""
+
+    def refuse(error_code: str) -> None:
+        body = json.dumps(
+            {"error": error_code, "error_description": "refused in this test"}
+        ).encode("utf-8")
+
+        def post(**_kwargs: object) -> _TokenEndpointResponse:
+            return _TokenEndpointResponse(status=400, data=body)
+
+        monkeypatch.setattr(auth, "Request", lambda: post)
+
+    return refuse
+
+
+@pytest.fixture
+def browser_consent(
+    monkeypatch: pytest.MonkeyPatch, oauth_client_file: Path
+) -> Credentials:
+    """Stand in for the browser consent, which grants these fresh credentials."""
+    oauth_client_file.write_text(json.dumps({"installed": FAKE_CLIENT}), encoding="utf-8")
+    authorized = Credentials.from_authorized_user_info(
+        {**FAKE_CLIENT, "token": "freshly-authorized-token"}, SCOPES
+    )
+    monkeypatch.setattr(auth, "authorize_in_browser", lambda scopes: authorized)
+    return authorized
+
+
 def test_a_still_valid_cached_token_is_reused_without_a_refresh(
     tmp_path: Path, unreachable_token_endpoint: None
 ) -> None:
@@ -125,16 +158,45 @@ def test_missing_oauth_client_file_exits_naming_the_file_and_the_readme(
 
 
 def test_credentials_from_the_browser_flow_are_cached_for_the_next_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, oauth_client_file: Path
+    tmp_path: Path, browser_consent: Credentials
 ) -> None:
-    oauth_client_file.write_text(json.dumps({"installed": FAKE_CLIENT}), encoding="utf-8")
     token_file = tmp_path / "no-token-yet.json"
-    authorized = Credentials.from_authorized_user_info(
-        {**FAKE_CLIENT, "token": "freshly-authorized-token"}, SCOPES
-    )
-    monkeypatch.setattr(auth, "authorize_in_browser", lambda scopes: authorized)
 
     creds = auth.get_credentials(SCOPES, token_file)
 
-    assert creds is authorized
+    assert creds is browser_consent
     assert json.loads(token_file.read_text(encoding="utf-8"))["token"] == "freshly-authorized-token"
+
+
+def test_a_revoked_grant_runs_the_browser_consent_and_caches_its_token(
+    tmp_path: Path,
+    token_endpoint_refusing: Callable[[str], None],
+    browser_consent: Credentials,
+) -> None:
+    """Testing-mode refresh tokens expire after seven days; the next run asks for consent again."""
+    token_file = _cached_token_file(
+        tmp_path / "token.json", "stale-access-token", valid_for=-timedelta(hours=1)
+    )
+    token_endpoint_refusing("invalid_grant")
+
+    creds = auth.get_credentials(SCOPES, token_file)
+
+    assert creds is browser_consent
+    assert json.loads(token_file.read_text(encoding="utf-8"))["token"] == "freshly-authorized-token"
+
+
+def test_any_other_refresh_error_fails_loud_and_keeps_the_cached_token(
+    tmp_path: Path,
+    token_endpoint_refusing: Callable[[str], None],
+    browser_consent: Credentials,
+) -> None:
+    token_file = _cached_token_file(
+        tmp_path / "token.json", "stale-access-token", valid_for=-timedelta(hours=1)
+    )
+    cached = token_file.read_text(encoding="utf-8")
+    token_endpoint_refusing("invalid_client")
+
+    with pytest.raises(RefreshError, match="invalid_client"):
+        auth.get_credentials(SCOPES, token_file)
+
+    assert token_file.read_text(encoding="utf-8") == cached
