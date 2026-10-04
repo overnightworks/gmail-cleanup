@@ -35,7 +35,7 @@ ROOT_FILES = CONTAINER_FILES | frozenset(
         "uv.lock",
     }
 )
-ROOT_DIRECTORIES = frozenset({".github", "scripts", "src", "tests"})
+ROOT_DIRECTORIES = frozenset({".aco", ".github", "scripts", "src", "tests"})
 HOME_BY_SUFFIX = {
     ".py": "a cleanup script belongs in src/gmail_cleanup/, a helper under scripts/",
     ".md": "a document belongs next to its owner",
