@@ -36,17 +36,18 @@ jobs:
   sonar:
     needs: check
     runs-on: ubuntu-latest
-    # This repository is private and does not carry a SONAR_TOKEN secret for
-    # now (SonarCloud's Automatic Analysis covers it instead); every step
-    # below self-skips while the token is absent, so the job stays green. It
-    # arms the moment the repository turns public or is given the secret —
+    # While this repository is private, SonarCloud's Automatic Analysis covers
+    # it and a CI scan would collide with it (scanner exit 3), even though the
+    # org-wide SONAR_TOKEN reaches private repositories too. Every step below
+    # therefore self-skips for a private repository or an absent token, so the
+    # job stays green. It arms the moment the repository turns public —
     # switch Automatic Analysis off in SonarCloud at that point.
     env:
-      SONAR_ENABLED: ${{ secrets.SONAR_TOKEN != '' }}
+      SONAR_ENABLED: ${{ secrets.SONAR_TOKEN != '' && !github.event.repository.private }}
     steps:
       - name: Sonar scan disabled notice
         if: ${{ env.SONAR_ENABLED != 'true' }}
-        run: 'echo "::notice::SonarCloud scan skipped: no SONAR_TOKEN configured"'
+        run: 'echo "::notice::SonarCloud scan skipped: private repository or no SONAR_TOKEN"'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         if: ${{ env.SONAR_ENABLED == 'true' }}
         with:
