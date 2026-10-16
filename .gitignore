@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+.env
 credentials.json
 token_*.json
 personal_senders.json
