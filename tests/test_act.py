@@ -436,44 +436,41 @@ def test_run_counts_an_api_error_as_skipped_and_acts_on_the_next_sender(
     assert "trash: 1" in out
 
 
-def test_run_dry_run_prints_the_dry_run_notice(
+@pytest.fixture
+def dry_run_over(
     tmp_path: Path,
     fake_gmail_service_builder: Callable[..., Any],
     row: Callable[..., dict[str, str]],
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
-    capsys: pytest.CaptureFixture[str],
     gmail_service_behind: Callable[..., None],
     build_messages_page: Callable[..., dict[str, Any]],
+) -> Callable[..., None]:
+    """Dry-run ``act.run`` over one sender whose mailbox holds a message, once per given action."""
+
+    def run_with_actions(*actions: str) -> None:
+        service = fake_gmail_service_builder({"from:a@example.com": [build_messages_page()]})
+        gmail_service_behind(act, service)
+        csv_path = tmp_path / "senders.csv"
+        write_csv_of_senders(
+            csv_path, [row(action=action, from_email="a@example.com") for action in actions]
+        )
+        act.run(csv_path, execute=False)
+
+    return run_with_actions
+
+
+def test_run_dry_run_prints_the_dry_run_notice(
+    dry_run_over: Callable[..., None], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    service = fake_gmail_service_builder({"from:a@example.com": [build_messages_page()]})
-    gmail_service_behind(act, service)
-
-    csv_path = tmp_path / "senders.csv"
-    write_csv_of_senders(csv_path, [row(action="trash", from_email="a@example.com")])
-
-    act.run(csv_path, execute=False)
+    dry_run_over("trash")
 
     assert "DRY RUN" in capsys.readouterr().out
 
 
 def test_run_prints_the_summary_in_the_declared_order_of_the_actions(
-    tmp_path: Path,
-    fake_gmail_service_builder: Callable[..., Any],
-    row: Callable[..., dict[str, str]],
-    write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
-    capsys: pytest.CaptureFixture[str],
-    gmail_service_behind: Callable[..., None],
-    build_messages_page: Callable[..., dict[str, Any]],
+    dry_run_over: Callable[..., None], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    service = fake_gmail_service_builder({"from:a@example.com": [build_messages_page()]})
-    gmail_service_behind(act, service)
-    csv_path = tmp_path / "senders.csv"
-    write_csv_of_senders(
-        csv_path,
-        [row(action=action, from_email="a@example.com") for action in ("keep", "filter", "trash")],
-    )
-
-    act.run(csv_path, execute=False)
+    dry_run_over("keep", "filter", "trash")
 
     summary = capsys.readouterr().out.split("Summary:")[1]
     assert summary.index("trash: 1") < summary.index("filter: 1") < summary.index("keep: 1")
