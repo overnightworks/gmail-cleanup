@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from gmail_cleanup import unsubscribe
+from gmail_cleanup import act, unsubscribe
 
 CANDIDATE_ROW = {
     "action": "unsubscribe",
@@ -67,7 +67,7 @@ def test_load_candidates_includes_an_eligible_active_sender(
 def test_unsubscribe_reports_success_for_a_2xx_response(
     monkeypatch: pytest.MonkeyPatch, fake_urlopen: Callable[[int], Callable[..., object]]
 ) -> None:
-    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", fake_urlopen(200))
+    monkeypatch.setattr(act.urllib.request, "urlopen", fake_urlopen(200))
 
     assert unsubscribe.unsubscribe("https://example.com/unsub") == (True, "HTTP 200")
 
@@ -75,7 +75,7 @@ def test_unsubscribe_reports_success_for_a_2xx_response(
 def test_unsubscribe_reports_failure_for_a_non_2xx_response(
     monkeypatch: pytest.MonkeyPatch, fake_urlopen: Callable[[int], Callable[..., object]]
 ) -> None:
-    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", fake_urlopen(404))
+    monkeypatch.setattr(act.urllib.request, "urlopen", fake_urlopen(404))
 
     assert unsubscribe.unsubscribe("https://example.com/unsub") == (False, "HTTP 404")
 
@@ -84,7 +84,7 @@ def test_unsubscribe_reports_the_status_of_an_http_error(monkeypatch: pytest.Mon
     def raise_http_error(req: object, timeout: int) -> None:
         raise urllib.error.HTTPError("https://example.com/unsub", 429, "too many requests", None, None)
 
-    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", raise_http_error)
+    monkeypatch.setattr(act.urllib.request, "urlopen", raise_http_error)
 
     assert unsubscribe.unsubscribe("https://example.com/unsub") == (False, "HTTP 429")
 
@@ -93,7 +93,7 @@ def test_unsubscribe_reports_a_network_error(monkeypatch: pytest.MonkeyPatch) ->
     def raise_url_error(req: object, timeout: int) -> None:
         raise urllib.error.URLError("boom")
 
-    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", raise_url_error)
+    monkeypatch.setattr(act.urllib.request, "urlopen", raise_url_error)
 
     ok, detail = unsubscribe.unsubscribe("https://example.com/unsub")
     assert ok is False
@@ -104,7 +104,7 @@ def test_unsubscribe_reports_an_unexpected_error(monkeypatch: pytest.MonkeyPatch
     def raise_value_error(req: object, timeout: int) -> None:
         raise ValueError("weird")
 
-    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", raise_value_error)
+    monkeypatch.setattr(act.urllib.request, "urlopen", raise_value_error)
 
     ok, detail = unsubscribe.unsubscribe("https://example.com/unsub")
     assert ok is False
@@ -122,7 +122,7 @@ def test_main_dry_run_lists_candidates_without_sending_anything(
     csv_path = tmp_path / "senders-full.csv"
     write_csv_of_senders(csv_path, [CANDIDATE_ROW])
     monkeypatch.setattr(sys, "argv", ["unsubscribe.py", "--csv", str(csv_path)])
-    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", unreachable_urlopen)
+    monkeypatch.setattr(act.urllib.request, "urlopen", unreachable_urlopen)
 
     unsubscribe.main()
 
@@ -158,7 +158,7 @@ def test_main_execute_counts_successes_and_failures(
         status = 500 if request.full_url.endswith("/fail") else 200
         return fake_urlopen(status)(request, timeout)
 
-    monkeypatch.setattr(unsubscribe.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(act.urllib.request, "urlopen", urlopen)
 
     unsubscribe.main()
 

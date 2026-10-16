@@ -37,8 +37,11 @@ def offers_one_click(url: str, post_header: str) -> bool:
     return url.startswith(("http://", "https://")) and ONE_CLICK_POST_BODY in post_header
 
 
-def one_click_request(url: str) -> urllib.request.Request:
-    return urllib.request.Request(url, data=ONE_CLICK_POST_BODY.encode(), method="POST")
+def post_one_click(url: str, timeout: int) -> int:
+    """Send the RFC 8058 one-click POST and return the HTTP status."""
+    request = urllib.request.Request(url, data=ONE_CLICK_POST_BODY.encode(), method="POST")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.status
 
 
 def one_click_unsubscribe(url: str, post_header: str) -> bool:
@@ -46,8 +49,7 @@ def one_click_unsubscribe(url: str, post_header: str) -> bool:
     if not offers_one_click(url, post_header):
         return False
     try:
-        with urllib.request.urlopen(one_click_request(url), timeout=10) as resp:
-            return 200 <= resp.status < 400
+        return 200 <= post_one_click(url, timeout=10) < 400
     except (urllib.error.URLError, TimeoutError) as e:
         print(f"    one-click POST failed: {e}")
         return False

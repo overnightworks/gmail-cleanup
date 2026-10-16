@@ -18,11 +18,10 @@ import csv
 import socket
 import sys
 import urllib.error
-import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from .act import offers_one_click, one_click_request
+from .act import offers_one_click, post_one_click
 from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
 HTTP_TIMEOUT = 10
@@ -54,9 +53,8 @@ def load_candidates(csv_path: Path, recent_cutoff: date) -> list[dict[str, str]]
 
 def unsubscribe(url: str) -> tuple[bool, str]:
     try:
-        with urllib.request.urlopen(one_click_request(url), timeout=HTTP_TIMEOUT) as resp:
-            ok = 200 <= resp.status < 400
-            return ok, f"HTTP {resp.status}"
+        status = post_one_click(url, timeout=HTTP_TIMEOUT)
+        return 200 <= status < 400, f"HTTP {status}"
     except urllib.error.HTTPError as e:
         return False, f"HTTP {e.code}"
     except (urllib.error.URLError, socket.timeout, TimeoutError) as e:
