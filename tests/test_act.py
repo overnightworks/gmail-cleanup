@@ -33,7 +33,7 @@ def row(build_senders_row: Callable[..., dict[str, str]]) -> Callable[..., dict[
 # --- one_click_unsubscribe -------------------------------------------------
 
 
-ONE_CLICK = "List-Unsubscribe=One-Click"
+ONE_CLICK = act.ONE_CLICK_POST_BODY
 
 
 @pytest.mark.parametrize(

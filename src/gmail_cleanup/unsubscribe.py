@@ -22,7 +22,7 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from .act import ONE_CLICK_POST_BODY, offers_one_click
+from .act import offers_one_click, one_click_request
 from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
 HTTP_TIMEOUT = 10
@@ -54,10 +54,7 @@ def load_candidates(csv_path: Path, recent_cutoff: date) -> list[dict[str, str]]
 
 def unsubscribe(url: str) -> tuple[bool, str]:
     try:
-        req = urllib.request.Request(
-            url, data=ONE_CLICK_POST_BODY.encode(), method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+        with urllib.request.urlopen(one_click_request(url), timeout=HTTP_TIMEOUT) as resp:
             ok = 200 <= resp.status < 400
             return ok, f"HTTP {resp.status}"
     except urllib.error.HTTPError as e:
