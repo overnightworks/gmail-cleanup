@@ -200,3 +200,33 @@ def test_any_other_refresh_error_fails_loud_and_keeps_the_cached_token(
         auth.get_credentials(SCOPES, token_file)
 
     assert token_file.read_text(encoding="utf-8") == cached
+
+
+@pytest.mark.parametrize(
+    ("bare_message", "grant_was_revoked"),
+    [
+        pytest.param("invalid_grant", True, id="bare invalid_grant message"),
+        pytest.param("invalid_grant: Token has been expired or revoked.", True, id="message with description"),
+        pytest.param("invalid_client", False, id="any other bare message"),
+    ],
+)
+def test_a_refresh_error_with_only_a_message_is_a_revoked_grant_only_for_invalid_grant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    browser_consent: Credentials,
+    bare_message: str,
+    grant_was_revoked: bool,
+) -> None:
+    def refuse(**_kwargs: object) -> None:
+        raise RefreshError(bare_message)
+
+    monkeypatch.setattr(auth, "Request", lambda: refuse)
+    token_file = _cached_token_file(
+        tmp_path / "token.json", "stale-access-token", valid_for=-timedelta(hours=1)
+    )
+
+    if grant_was_revoked:
+        assert auth.get_credentials(SCOPES, token_file) is browser_consent
+    else:
+        with pytest.raises(RefreshError, match=bare_message):
+            auth.get_credentials(SCOPES, token_file)

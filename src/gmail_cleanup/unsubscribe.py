@@ -22,6 +22,7 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from .act import ONE_CLICK_POST_BODY, offers_one_click
 from .paths import CSV_DIR, PATH_CONFINEMENT_HELP, resolve_within_directory
 
 HTTP_TIMEOUT = 10
@@ -37,9 +38,9 @@ def load_candidates(csv_path: Path, recent_cutoff: date) -> list[dict[str, str]]
             continue
         if row["has_list_unsubscribe"] != "yes":
             continue
-        if "One-Click" not in row.get("list_unsubscribe_post", ""):
-            continue
-        if not row.get("list_unsubscribe_url", "").startswith("http"):
+        if not offers_one_click(
+            row.get("list_unsubscribe_url", ""), row.get("list_unsubscribe_post", "")
+        ):
             continue
         try:
             newest = datetime.fromisoformat(row["newest_date"]).date()
@@ -54,7 +55,7 @@ def load_candidates(csv_path: Path, recent_cutoff: date) -> list[dict[str, str]]
 def unsubscribe(url: str) -> tuple[bool, str]:
     try:
         req = urllib.request.Request(
-            url, data=b"List-Unsubscribe=One-Click", method="POST"
+            url, data=ONE_CLICK_POST_BODY.encode(), method="POST"
         )
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
             ok = 200 <= resp.status < 400

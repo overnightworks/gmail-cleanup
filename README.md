@@ -50,6 +50,9 @@ PYTHONPATH=src python -m gmail_cleanup.recon --days 90
 # 2. Edit senders.csv — fill the 'action' column.
 #    Values: unsubscribe | trash | filter | keep | (blank)
 
+# 2b. Optional: let classify pre-fill 'action' first (needs your personal keep-patterns, see below).
+PYTHONPATH=src python -m gmail_cleanup.classify
+
 # 3. Dry run — shows what would happen.
 PYTHONPATH=src python -m gmail_cleanup.act --csv senders.csv
 

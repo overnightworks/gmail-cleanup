@@ -17,7 +17,7 @@ CANDIDATE_ROW = {
     "count": "5",
     "has_list_unsubscribe": "yes",
     "list_unsubscribe_url": "https://example.com/unsub",
-    "list_unsubscribe_post": "One-Click",
+    "list_unsubscribe_post": "List-Unsubscribe=One-Click",
     "newest_date": date.today().isoformat(),
 }
 
@@ -28,6 +28,8 @@ CANDIDATE_ROW = {
         pytest.param({"action": "keep"}, id="kept sender is never unsubscribed"),
         pytest.param({"has_list_unsubscribe": "no"}, id="no List-Unsubscribe header"),
         pytest.param({"list_unsubscribe_post": ""}, id="no RFC 8058 one-click support"),
+        pytest.param({"list_unsubscribe_post": "foo=bar"}, id="Post header names no one-click"),
+        pytest.param({"list_unsubscribe_post": "   "}, id="Post header is only whitespace"),
         pytest.param(
             {"list_unsubscribe_url": "mailto:unsub@example.com"}, id="no one-click http endpoint"
         ),
