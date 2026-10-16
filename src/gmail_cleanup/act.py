@@ -111,7 +111,7 @@ def _unsubscribe_row(service, row: dict[str, str], execute: bool) -> None:
         if execute:
             ok = one_click_unsubscribe(url, post_header)
             print(f"    one-click: {'ok' if ok else 'not sent (no Post header or HTTP fail)'}")
-        if url and not post_header:
+        if url and not offers_one_click(url, post_header):
             print(f"    manual URL (no one-click): {url}")
     else:
         _report(

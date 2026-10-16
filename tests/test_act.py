@@ -316,7 +316,7 @@ def test_process_row_unsubscribe_reports_a_failed_one_click(
     assert "not sent" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("post_header", ["", "   "])
+@pytest.mark.parametrize("post_header", ["", "   ", "foo=bar"])
 def test_process_row_unsubscribe_prints_the_manual_url_when_there_is_no_one_click(
     fake_gmail_service_builder: Callable[..., Any],
     row: Callable[..., dict[str, str]],
