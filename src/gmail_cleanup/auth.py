@@ -65,4 +65,6 @@ def get_credentials(scopes: list[str], token_file: Path) -> Credentials:
 def _grant_was_revoked(error: RefreshError) -> bool:
     """Whether the token endpoint answered with the revoked-grant error code."""
     response = error.args[1] if len(error.args) > 1 else None
-    return isinstance(response, Mapping) and response.get("error") == GRANT_REVOKED_ERROR
+    if isinstance(response, Mapping):
+        return response.get("error") == GRANT_REVOKED_ERROR
+    return str(error.args[0] if error.args else "").startswith(GRANT_REVOKED_ERROR)

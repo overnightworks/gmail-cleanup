@@ -28,24 +28,28 @@ ACTION_UNSUBSCRIBE = "unsubscribe"
 ACTION_TRASH = "trash"
 ACTION_FILTER = "filter"
 ACTION_KEEP = "keep"
-VALID_ACTIONS = {ACTION_UNSUBSCRIBE, ACTION_TRASH, ACTION_FILTER, ACTION_KEEP, ""}
+VALID_ACTIONS = (ACTION_UNSUBSCRIBE, ACTION_TRASH, ACTION_FILTER, ACTION_KEEP, "")
+ONE_CLICK_POST_BODY = "List-Unsubscribe=One-Click"
 
 
-def offers_one_click(url: str, has_post_header: bool) -> bool:
+def offers_one_click(url: str, post_header: str) -> bool:
     """Whether the sender supports an RFC 8058 one-click POST to ``url``."""
-    return url.startswith("http") and has_post_header
+    return url.startswith(("http://", "https://")) and ONE_CLICK_POST_BODY in post_header
 
 
-def one_click_unsubscribe(url: str, has_post_header: bool) -> bool:
-    """RFC 8058 one-click POST if List-Unsubscribe-Post header was present."""
-    if not offers_one_click(url, has_post_header):
+def post_one_click(url: str, timeout: int) -> int:
+    """Send the RFC 8058 one-click POST and return the HTTP status."""
+    request = urllib.request.Request(url, data=ONE_CLICK_POST_BODY.encode(), method="POST")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.status
+
+
+def one_click_unsubscribe(url: str, post_header: str) -> bool:
+    """RFC 8058 one-click POST, sent only if the List-Unsubscribe-Post header asks for it."""
+    if not offers_one_click(url, post_header):
         return False
     try:
-        req = urllib.request.Request(
-            url, data=b"List-Unsubscribe=One-Click", method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return 200 <= resp.status < 400
+        return 200 <= post_one_click(url, timeout=10) < 400
     except (urllib.error.URLError, TimeoutError) as e:
         print(f"    one-click POST failed: {e}")
         return False
@@ -104,18 +108,22 @@ def _report(execute: bool, done: str, planned: str) -> None:
 def _unsubscribe_row(service, row: dict[str, str], execute: bool) -> None:
     email = row["from_email"]
     url = row["list_unsubscribe_url"]
-    has_post_header = bool(row.get("list_unsubscribe_post", "").strip())
+    post_header = row.get("list_unsubscribe_post", "").strip()
     has_list_unsubscribe = row["has_list_unsubscribe"] == "yes"
     if has_list_unsubscribe:
         if execute:
-            ok = one_click_unsubscribe(url, has_post_header)
+            ok = one_click_unsubscribe(url, post_header)
             print(f"    one-click: {'ok' if ok else 'not sent (no Post header or HTTP fail)'}")
-        if url and not row.get("list_unsubscribe_post"):
+        if url and not offers_one_click(url, post_header):
             print(f"    manual URL (no one-click): {url}")
     else:
-        print("    no List-Unsubscribe header — trashing only")
+        _report(
+            execute,
+            done="no List-Unsubscribe header — trashing only",
+            planned="no List-Unsubscribe header — would trash only",
+        )
     n = trash_messages_from(service, email, execute)
-    if has_list_unsubscribe and offers_one_click(url, has_post_header):
+    if has_list_unsubscribe and offers_one_click(url, post_header):
         planned = f"would unsubscribe (one-click) and trash {n} existing"
     else:
         planned = f"would trash {n} existing messages"

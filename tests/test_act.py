@@ -16,7 +16,7 @@ MARKETING_SENDER = {
     "count": "3",
     "has_list_unsubscribe": "yes",
     "list_unsubscribe_url": "https://example.com/u",
-    "list_unsubscribe_post": "One-Click",
+    "list_unsubscribe_post": "List-Unsubscribe=One-Click",
 }
 
 
@@ -33,22 +33,31 @@ def row(build_senders_row: Callable[..., dict[str, str]]) -> Callable[..., dict[
 # --- one_click_unsubscribe -------------------------------------------------
 
 
+ONE_CLICK = act.ONE_CLICK_POST_BODY
+
+
 @pytest.mark.parametrize(
-    ("url", "has_post_header"),
+    ("url", "post_header"),
     [
-        pytest.param("mailto:unsub@example.com", True, id="unsubscribe url is not http"),
-        pytest.param("https://example.com/u", False, id="sender sent no List-Unsubscribe-Post"),
+        pytest.param("mailto:unsub@example.com", ONE_CLICK, id="unsubscribe url is not http"),
+        pytest.param("https://example.com/u", "", id="sender sent no List-Unsubscribe-Post"),
+        pytest.param("https://example.com/u", "foo=bar", id="Post header names no one-click"),
+        pytest.param("https://example.com/u", "   ", id="Post header is only whitespace"),
     ],
 )
 def test_one_click_unsubscribe_sends_nothing_it_may_not_send(
     monkeypatch: pytest.MonkeyPatch,
     unreachable_urlopen: Callable[..., object],
     url: str,
-    has_post_header: bool,
+    post_header: str,
 ) -> None:
     monkeypatch.setattr(act.urllib.request, "urlopen", unreachable_urlopen)
 
-    assert act.one_click_unsubscribe(url, has_post_header=has_post_header) is False
+    assert act.one_click_unsubscribe(url, post_header=post_header) is False
+
+
+def test_offers_one_click_accepts_an_https_url_with_the_one_click_post_header() -> None:
+    assert act.offers_one_click("https://example.com/u", ONE_CLICK) is True
 
 
 @pytest.mark.parametrize(
@@ -66,7 +75,7 @@ def test_one_click_unsubscribe_follows_the_response_status(
 ) -> None:
     monkeypatch.setattr(act.urllib.request, "urlopen", fake_urlopen(status))
 
-    assert act.one_click_unsubscribe("https://example.com/u", has_post_header=True) is succeeded
+    assert act.one_click_unsubscribe("https://example.com/u", post_header=ONE_CLICK) is succeeded
 
 
 def test_one_click_unsubscribe_catches_a_network_error(
@@ -77,7 +86,7 @@ def test_one_click_unsubscribe_catches_a_network_error(
 
     monkeypatch.setattr(act.urllib.request, "urlopen", raise_url_error)
 
-    assert act.one_click_unsubscribe("https://example.com/u", has_post_header=True) is False
+    assert act.one_click_unsubscribe("https://example.com/u", post_header=ONE_CLICK) is False
     assert "one-click POST failed" in capsys.readouterr().out
 
 
@@ -172,6 +181,18 @@ def test_process_row_trash_action_batch_modifies_under_execute(
             False,
             "would trash 1 existing messages",
             id="unsubscribe without one-click dry run",
+        ),
+        pytest.param(
+            {"action": "unsubscribe", "has_list_unsubscribe": "no"},
+            False,
+            "no List-Unsubscribe header — would trash only",
+            id="unsubscribe without header dry run",
+        ),
+        pytest.param(
+            {"action": "unsubscribe", "has_list_unsubscribe": "no"},
+            True,
+            "no List-Unsubscribe header — trashing only",
+            id="unsubscribe without header executed",
         ),
     ],
 )
@@ -295,6 +316,7 @@ def test_process_row_unsubscribe_reports_a_failed_one_click(
     assert "not sent" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("post_header", ["", "   ", "foo=bar"])
 def test_process_row_unsubscribe_prints_the_manual_url_when_there_is_no_one_click(
     fake_gmail_service_builder: Callable[..., Any],
     row: Callable[..., dict[str, str]],
@@ -302,12 +324,13 @@ def test_process_row_unsubscribe_prints_the_manual_url_when_there_is_no_one_clic
     unreachable_urlopen: Callable[..., object],
     capsys: pytest.CaptureFixture[str],
     build_messages_page: Callable[..., dict[str, Any]],
+    post_header: str,
 ) -> None:
     service = fake_gmail_service_builder({"from:promo@example.com": [build_messages_page()]})
     monkeypatch.setattr(act.urllib.request, "urlopen", unreachable_urlopen)
 
     act.process_row(
-        service, row(action="unsubscribe", list_unsubscribe_post=""), execute=True
+        service, row(action="unsubscribe", list_unsubscribe_post=post_header), execute=True
     )
 
     out = capsys.readouterr().out
@@ -413,24 +436,44 @@ def test_run_counts_an_api_error_as_skipped_and_acts_on_the_next_sender(
     assert "trash: 1" in out
 
 
-def test_run_dry_run_prints_the_dry_run_notice(
+@pytest.fixture
+def dry_run_over(
     tmp_path: Path,
     fake_gmail_service_builder: Callable[..., Any],
     row: Callable[..., dict[str, str]],
     write_csv_of_senders: Callable[[Path, list[dict[str, str]]], None],
-    capsys: pytest.CaptureFixture[str],
     gmail_service_behind: Callable[..., None],
     build_messages_page: Callable[..., dict[str, Any]],
+) -> Callable[..., None]:
+    """Dry-run ``act.run`` over one sender whose mailbox holds a message, once per given action."""
+
+    def run_with_actions(*actions: str) -> None:
+        service = fake_gmail_service_builder({"from:a@example.com": [build_messages_page()]})
+        gmail_service_behind(act, service)
+        csv_path = tmp_path / "senders.csv"
+        write_csv_of_senders(
+            csv_path, [row(action=action, from_email="a@example.com") for action in actions]
+        )
+        act.run(csv_path, execute=False)
+
+    return run_with_actions
+
+
+def test_run_dry_run_prints_the_dry_run_notice(
+    dry_run_over: Callable[..., None], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    service = fake_gmail_service_builder({"from:a@example.com": [build_messages_page()]})
-    gmail_service_behind(act, service)
-
-    csv_path = tmp_path / "senders.csv"
-    write_csv_of_senders(csv_path, [row(action="trash", from_email="a@example.com")])
-
-    act.run(csv_path, execute=False)
+    dry_run_over("trash")
 
     assert "DRY RUN" in capsys.readouterr().out
+
+
+def test_run_prints_the_summary_in_the_declared_order_of_the_actions(
+    dry_run_over: Callable[..., None], capsys: pytest.CaptureFixture[str]
+) -> None:
+    dry_run_over("keep", "filter", "trash")
+
+    summary = capsys.readouterr().out.split("Summary:")[1]
+    assert summary.index("trash: 1") < summary.index("filter: 1") < summary.index("keep: 1")
 
 
 # --- main() --------------------------------------------------------------
