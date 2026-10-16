@@ -133,6 +133,7 @@ def test_an_allowlisted_listing_carries_no_problem() -> None:
         "README.md",
         "compose.yaml",
         "pyproject.toml",
+        "quality/config.toml",
         "sonar-project.properties",
         "uv.lock",
         ".github/workflows/ci.yml",
