@@ -70,7 +70,7 @@ uv run --locked --no-build pytest
 uv run --locked --no-build python scripts/check_root_layout.py
 ```
 
-The last command is the root layout gate: it fails naming any file at the repository root that does not belong there (`AGENTS.md`, "Repository layout").
+The last command is the root layout gate: it fails naming any file at the repository root that does not belong there (the global contract's "Repository layout").
 
 CI runs the same commands, then uploads coverage to SonarCloud and fails on any open finding in scope.
 
