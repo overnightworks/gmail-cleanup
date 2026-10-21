@@ -2,11 +2,12 @@
 
 The root carries the package manifest and its lockfile, the container files,
 the scanner configuration, the licence, and the entry documents. Everything
-else lives in the directory of its owner (AGENTS.md, "Repository layout"): a
-cleanup script in the package under `src/`, a helper under `scripts/`, a
-fixture next to its test. The gate reads the tree as git sees it — tracked
-files and untracked files git does not ignore — so a file that strays onto a
-runner is red too, and every refusal names where the file belongs.
+else lives in the directory of its owner (the global contract's "Repository
+layout"): a cleanup script in the package under `src/`, a helper under
+`scripts/`, a fixture next to its test. The gate reads the tree as git sees
+it — tracked files and untracked files git does not ignore — so a file that
+strays onto a runner is red too, and every refusal names where the file
+belongs.
 """
 
 from __future__ import annotations
